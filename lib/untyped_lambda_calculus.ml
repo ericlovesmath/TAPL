@@ -45,19 +45,22 @@ let%expect_test "syntax" =
 let%expect_test "boolean" =
   let tru = "t" > ("f" > v "t") in
   let fls = "t" > ("f" > v "f") in
-  let test = "l" > ("m" > ("n" > (v "l" $ v "m" $ v "n"))) in
   let andb = "b" > ("c" > (v "b" $ v "c" $ fls)) in
-  print (test $ tru $ v "t" $ v "f");
-  print (test $ fls $ v "t" $ v "f");
+  let test b =
+    let test = "l" > ("m" > ("n" > (v "l" $ v "m" $ v "n"))) in
+    test $ b $ v "t" $ v "f"
+  in
+  print (test tru);
+  print (test fls);
   [%expect
     {|
     (Var t)
     (Var f)
   |}];
-  print (test $ (andb $ tru $ tru) $ v "t" $ v "f");
-  print (test $ (andb $ tru $ fls) $ v "t" $ v "f");
-  print (test $ (andb $ fls $ tru) $ v "t" $ v "f");
-  print (test $ (andb $ fls $ fls) $ v "t" $ v "f");
+  print (test (andb $ tru $ tru));
+  print (test (andb $ tru $ fls));
+  print (test (andb $ fls $ tru));
+  print (test (andb $ fls $ fls));
   [%expect
     {|
     (Var t)
