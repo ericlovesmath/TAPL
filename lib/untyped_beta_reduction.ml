@@ -27,8 +27,6 @@ let rec beta = function
      | _ -> App (f, x))
 ;;
 
-let print t = t |> beta |> sexp_of_t |> Sexp.to_string_hum |> print_endline
-
 module Syntax = struct
   let ( $ ) f x = App (f, x)
   let v x = Var x
@@ -36,6 +34,8 @@ module Syntax = struct
 end
 
 include Syntax
+
+let print t = t |> beta |> sexp_of_t |> Sexp.to_string_hum |> print_endline
 
 let%expect_test "syntax" =
   print @@ v "x";
