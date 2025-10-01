@@ -1,6 +1,10 @@
 open Core
 
-type t = Var of string | Lam of string * t | App of t * t [@@deriving sexp]
+type t =
+  | Var of string
+  | Lam of string * t
+  | App of t * t
+[@@deriving sexp]
 
 let rec subst (v : string) (t : t) (redex : t) =
   match redex with
@@ -9,15 +13,19 @@ let rec subst (v : string) (t : t) (redex : t) =
   | Lam (v', _) when String.equal v v' -> Lam (v', t)
   | Lam (v', t') -> Lam (v', subst v t t')
   | App (f, x) -> App (subst v t f, subst v t x)
+;;
 
 (* Call-by-name reduction *)
 let rec beta = function
   | Var v -> Var v
   | Lam (v, t) -> Lam (v, beta t)
-  | App (f, x) -> (
-      let f = beta f in
-      let x = beta x in
-      match f with Lam (v, t) -> beta (subst v x t) | _ -> App (f, x))
+  | App (f, x) ->
+    let f = beta f in
+    let x = beta x in
+    (match f with
+     | Lam (v, t) -> beta (subst v x t)
+     | _ -> App (f, x))
+;;
 
 let print t = t |> beta |> sexp_of_t |> Sexp.to_string_hum |> print_endline
 
@@ -32,6 +40,7 @@ include Syntax
 let%expect_test "syntax" =
   print @@ v "x";
   [%expect "(Var x)"]
+;;
 
 let%expect_test "boolean" =
   let tru = "t" > ("f" > v "t") in
@@ -40,7 +49,8 @@ let%expect_test "boolean" =
   let andb = "b" > ("c" > (v "b" $ v "c" $ fls)) in
   print (test $ tru $ v "t" $ v "f");
   print (test $ fls $ v "t" $ v "f");
-  [%expect {|
+  [%expect
+    {|
     (Var t)
     (Var f)
   |}];
@@ -48,9 +58,11 @@ let%expect_test "boolean" =
   print (test $ (andb $ tru $ fls) $ v "t" $ v "f");
   print (test $ (andb $ fls $ tru) $ v "t" $ v "f");
   print (test $ (andb $ fls $ fls) $ v "t" $ v "f");
-  [%expect {|
+  [%expect
+    {|
     (Var t)
     (Var f)
     (Var f)
     (Var f)
     |}]
+;;
