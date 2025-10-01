@@ -1,0 +1,7 @@
+(library
+ (name TAPL)
+ (libraries core)
+ (preprocess
+  (pps ppx_sexp_conv ppx_expect))
+ (inline_tests))
+
