@@ -1,4 +1,5 @@
 open Core
+module U = Untyped_lambda_calculus
 
 type t =
   | Var of int
@@ -6,7 +7,6 @@ type t =
   | App of t * t
 [@@deriving sexp]
 
-type lambda = Untyped_lambda_calculus.t [@@deriving sexp]
 type context = string list
 
 let find (ctx : context) (v : string) : int option =
@@ -18,8 +18,7 @@ let find (ctx : context) (v : string) : int option =
   find' 0 ctx
 ;;
 
-(** [Exercise 6.1.5] Converts to DeBruijn indices *)
-let rec remove_names (ctx : context) (t : lambda) : t option =
+let rec remove_names (ctx : context) (t : U.t) : t option =
   let open Option.Let_syntax in
   match t with
   | Var v ->
@@ -34,22 +33,27 @@ let rec remove_names (ctx : context) (t : lambda) : t option =
     return (App (f, x))
 ;;
 
-(** [Exercise 6.1.5] Converts from DeBruijn indices *)
-let rec restore_names (ctx : context) (t : t) : lambda option =
+let rec restore_names (ctx : context) (t : t) : U.t option =
   let open Option.Let_syntax in
   match t with
   | Var i ->
     let%map v = List.nth ctx i in
-    Untyped_lambda_calculus.Var v
+    U.Var v
   | Abs t ->
     let sym = Utils.gen_sym () in
     let%map t = restore_names (sym :: ctx) t in
-    Untyped_lambda_calculus.Lam (sym, t)
+    U.Lam (sym, t)
   | App (f, x) ->
     let%bind f = restore_names ctx f in
     let%bind x = restore_names ctx x in
-    return (Untyped_lambda_calculus.App (f, x))
+    return (U.App (f, x))
 ;;
+
+module Syntax = struct
+  let ( $ ) f x = App (f, x)
+  let v i = Var i
+  let h t = Abs t
+end
 
 (* TODO Quickcheck circle? *)
 
@@ -60,7 +64,7 @@ let%expect_test "remove and restore names" =
     Utils.counter := 0;
     let nameless = remove_names [] original in
     let renamed = Option.bind ~f:(restore_names []) nameless in
-    [%message (original : lambda) (nameless : t option) (renamed : lambda option)]
+    [%message (original : U.t) (nameless : t option) (renamed : U.t option)]
     |> Sexp.to_string_hum
     |> print_endline
   in
