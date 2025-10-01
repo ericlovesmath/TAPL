@@ -2,6 +2,6 @@
  (name TAPL)
  (libraries core)
  (preprocess
-  (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message))
+  (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_quick_test ppx_compare))
  (inline_tests))
 

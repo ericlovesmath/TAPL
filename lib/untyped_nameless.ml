@@ -1,11 +1,12 @@
 open Core
 module U = Untyped_lambda_calculus
+module Unique_id = Unique_id.Int ()
 
 type t =
-  | Var of int
+  | Var of int [@quickcheck.generator Int.gen_incl 0 5]
   | Abs of t
   | App of t * t
-[@@deriving sexp]
+[@@deriving sexp, equal, quickcheck]
 
 type context = string list
 
@@ -33,6 +34,8 @@ let rec remove_names (ctx : context) (t : U.t) : t option =
     return (App (f, x))
 ;;
 
+let gen_sym () = "x." ^ Unique_id.to_string (Unique_id.create ())
+
 let rec restore_names (ctx : context) (t : t) : U.t option =
   let open Option.Let_syntax in
   match t with
@@ -40,7 +43,7 @@ let rec restore_names (ctx : context) (t : t) : U.t option =
     let%map v = List.nth ctx i in
     U.Var v
   | Abs t ->
-    let sym = Utils.gen_sym () in
+    let sym = gen_sym () in
     let%map t = restore_names (sym :: ctx) t in
     U.Lam (sym, t)
   | App (f, x) ->
@@ -55,13 +58,11 @@ module Syntax = struct
   let h t = Abs t
 end
 
-(* TODO Quickcheck circle? *)
-
 (* Examples selected from [Exercise 6.1.1] *)
 let%expect_test "remove and restore names" =
   let open Untyped_lambda_calculus.Syntax in
   let test original =
-    Utils.counter := 0;
+    Unique_id.For_testing.reset_counter ();
     let nameless = remove_names [] original in
     let renamed = Option.bind ~f:(restore_names []) nameless in
     [%message (original : U.t) (nameless : t option) (renamed : U.t option)]
@@ -127,4 +128,21 @@ let%expect_test "remove and restore names" =
      (nameless ((App (Abs (Abs (Var 0))) (Abs (Var 0)))))
      (renamed ((App (Lam x.0 (Lam x.1 (Var x.1))) (Lam x.2 (Var x.2))))))
     |}]
+;;
+
+let%quick_test "quickcheck round trip restore and remove names" =
+  fun (t : t) ->
+  let open Option.Let_syntax in
+  assert (
+    let result =
+      let%bind named = restore_names [] t in
+      let%bind nameless = remove_names [] named in
+      Some (equal nameless t)
+    in
+    (* TODO: Quickcheck generator sometimes generates invalid expressions,
+       capping [Var i] to [0 <= i <= 5] results in ~7% of inputs being valid.
+       Right now, we just ignore invalid inputs.
+
+       Rewrite a proper Quickcheck generator that only emits valid forms. *)
+    Option.value result ~default:true)
 ;;
