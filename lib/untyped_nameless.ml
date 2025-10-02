@@ -52,6 +52,33 @@ let rec restore_names (ctx : context) (t : t) : U.t option =
     return (U.App (f, x))
 ;;
 
+let shift d t =
+  let rec aux c t =
+    match t with
+    | Var i -> if i >= c then Var (i + d) else Var i
+    | Abs t -> Abs (aux (c + 1) t)
+    | App (f, x) -> App (aux c f, aux c x)
+  in
+  aux 0 t
+;;
+
+let subst j s t =
+  let rec aux c t =
+    match t with
+    | Var i -> if i = j + c then shift c s else Var i
+    | Abs t -> Abs (aux (c + 1) t)
+    | App (f, x) -> App (aux c f, aux c x)
+  in
+  aux 0 t
+;;
+
+let rec eval t =
+  match t with
+  | Abs _ | Var _ -> t
+  | App (Abs t, ((Var _ | Abs _) as x)) -> eval (shift (-1) (subst 0 (shift 1 x) t))
+  | App (f, x) -> eval (App (eval f, eval x))
+;;
+
 module Syntax = struct
   let ( $ ) f x = App (f, x)
   let v i = Var i
@@ -145,4 +172,52 @@ let%quick_test "quickcheck round trip restore and remove names" =
 
        Rewrite a proper Quickcheck generator that only emits valid forms. *)
     Option.value result ~default:true)
+;;
+
+open Untyped_lambda_calculus.Syntax
+
+let print ctx t =
+  t
+  |> remove_names ctx
+  |> Option.value_exn
+  |> eval
+  |> sexp_of_t
+  |> Sexp.to_string_hum
+  |> print_endline
+;;
+
+let%expect_test "eval simple" =
+  print [ "x" ] @@ v "x";
+  [%expect "(Var 0)"];
+  print [ "x" ] @@ ("x" > v "x" $ v "x");
+  [%expect "(Var 0)"]
+;;
+
+(* We test with [gamma = [ "f"; "t" ]], so ["f" = Var 0] and ["t" = Var 1] *)
+let%expect_test "eval booleans" =
+  let tru = "t" > ("f" > v "t") in
+  let fls = "t" > ("f" > v "f") in
+  let andb = "b" > ("c" > (v "b" $ v "c" $ fls)) in
+  let test b =
+    let test = "l" > ("m" > ("n" > (v "l" $ v "m" $ v "n"))) in
+    print [ "f"; "t" ] (test $ b $ v "t" $ v "f")
+  in
+  test tru;
+  test fls;
+  [%expect
+    {|
+    (Var 1)
+    (Var 0)
+    |}];
+  test (andb $ tru $ tru);
+  test (andb $ tru $ fls);
+  test (andb $ fls $ tru);
+  test (andb $ fls $ fls);
+  [%expect
+    {|
+    (Var 1)
+    (Var 0)
+    (Var 0)
+    (Var 0)
+    |}]
 ;;
