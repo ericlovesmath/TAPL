@@ -1,3 +1,1 @@
-open TAPL.Untyped_beta_reduction
-
-let _ = Var "x"
+let () = print_endline "Use [dune test] instead"

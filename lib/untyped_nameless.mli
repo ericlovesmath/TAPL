@@ -14,15 +14,3 @@ val restore_names : context -> t -> Untyped_lambda_calculus.t option
 
 (** [Exercise 7] Evaluates nameless lambda expression with shift/subst *)
 val eval : t -> t
-
-(** Use [open Syntax] to write [t] terms with shorter syntax *)
-module Syntax : sig
-  (** Shorthand for [Var v] *)
-  val v : int -> t
-
-  (** Shorthand for [Abs t] *)
-  val h : t -> t
-
-  (** Shorthand for [App (f, x)] *)
-  val ( $ ) : t -> t -> t
-end

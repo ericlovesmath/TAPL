@@ -1,4 +1,5 @@
 open Core
+open Sexplib.Sexp
 module U = Untyped_lambda_calculus
 module Unique_id = Unique_id.Int ()
 
@@ -7,6 +8,32 @@ type t =
   | Abs of t
   | App of t * t
 [@@deriving sexp, equal, quickcheck]
+
+let rec sexp_of_t = function
+  | Var i -> Atom (Int.to_string i)
+  | Abs t -> List [ Atom "abs"; sexp_of_t t ]
+  | App (f, x) -> List [ sexp_of_t f; sexp_of_t x ]
+;;
+
+let t_of_sexp sexp =
+  let fail = Fn.compose failwith Sexp.to_string in
+  let rec parse = function
+    | Atom atom ->
+      (match Int.of_string_opt atom with
+       | Some i -> Var i
+       | None -> fail [%message "Unknown atom" atom])
+    | List [ x ] -> parse x
+    | List (Atom "abs" :: rest) -> Abs (parse (List rest))
+    (* Left-associative application syntax *)
+    | List (h :: t) -> List.fold_left ~f:(fun f x -> App (f, parse x)) ~init:(parse h) t
+    | List xs -> fail [%message "Unknown list" (xs : Sexp.t list)]
+  in
+  parse sexp
+;;
+
+let%quick_test "quickcheck round trip sexp parser" =
+  fun (t : t) -> assert (equal t (t_of_sexp (sexp_of_t t)))
+;;
 
 type context = string list
 
@@ -79,81 +106,57 @@ let rec eval t =
   | App (f, x) -> eval (App (eval f, eval x))
 ;;
 
-module Syntax = struct
-  let ( $ ) f x = App (f, x)
-  let v i = Var i
-  let h t = Abs t
-end
-
 (* Examples selected from [Exercise 6.1.1] *)
 let%expect_test "remove and restore names" =
-  let open Untyped_lambda_calculus.Syntax in
-  let test original =
+  let test s =
     Unique_id.For_testing.reset_counter ();
+    let original = U.t_of_sexp (Sexp.of_string s) in
     let nameless = remove_names [] original in
     let renamed = Option.bind ~f:(restore_names []) nameless in
-    [%message (original : U.t) (nameless : t option) (renamed : U.t option)]
+    [%message (nameless : t option) (renamed : U.t option)]
     |> Sexp.to_string_hum
     |> print_endline
   in
-  let s, z, f, x, y = v "s", v "z", v "f", v "x", v "y" in
   (* simple = λx. x *)
-  test ("x" > x);
+  test "(fun x -> x)";
   [%expect
-    {|
-    ((original (Lam x (Var x))) (nameless ((Abs (Var 0))))
-     (renamed ((Lam x.0 (Var x.0)))))
-    |}];
+    {| ((nameless ((abs 0))) (renamed ((fun x.0 -> x.0)))) |}];
   (* c_0 = λs. λz. z *)
-  test ("s" > ("z" > z));
+  test "(fun s -> fun z -> z)";
   [%expect
-    {|
-    ((original (Lam s (Lam z (Var z)))) (nameless ((Abs (Abs (Var 0)))))
-     (renamed ((Lam x.0 (Lam x.1 (Var x.1))))))
-    |}];
+    {| ((nameless ((abs (abs 0)))) (renamed ((fun x.0 -> (fun x.1 -> x.1))))) |}];
   (* c_2 = λs. λz. s (s z) *)
-  test ("s" > ("z" > (s $ (s $ z))));
+  test "(fun s -> fun z -> s (s z))";
   [%expect
     {|
-    ((original (Lam s (Lam z (App (Var s) (App (Var s) (Var z))))))
-     (nameless ((Abs (Abs (App (Var 1) (App (Var 1) (Var 0)))))))
-     (renamed ((Lam x.0 (Lam x.1 (App (Var x.0) (App (Var x.0) (Var x.1))))))))
+    ((nameless ((abs (abs (1 (1 0))))))
+     (renamed ((fun x.0 -> (fun x.1 -> (x.0 (x.0 x.1)))))))
     |}];
   (* plus = λm. λn. λs. λz. m s (n z s) *)
-  test ("s" > ("z" > (s $ (s $ z))));
+  test "(fun m -> fun n -> fun s -> fun z -> m s (n z s))";
   [%expect
     {|
-    ((original (Lam s (Lam z (App (Var s) (App (Var s) (Var z))))))
-     (nameless ((Abs (Abs (App (Var 1) (App (Var 1) (Var 0)))))))
-     (renamed ((Lam x.0 (Lam x.1 (App (Var x.0) (App (Var x.0) (Var x.1))))))))
+    ((nameless ((abs (abs (abs (abs ((3 1) ((2 0) 1))))))))
+     (renamed
+      ((fun x.0 ->
+        (fun x.1 -> (fun x.2 -> (fun x.3 -> ((x.0 x.2) ((x.1 x.3) x.2)))))))))
     |}];
   (* fix = λf. (λx. f (λy. (x x) y)) (λx. f (λy. (x x) y)) *)
-  test ("f" > ("x" > (f $ ("y" > (x $ x $ y))) $ ("x" > (f $ ("y" > (x $ x $ y))))));
+  test "(fun f -> (fun x -> f (fun y -> x x y)) (fun x -> f (fun y -> x x y)))";
   [%expect
     {|
-    ((original
-      (Lam f
-       (App (Lam x (App (Var f) (Lam y (App (App (Var x) (Var x)) (Var y)))))
-        (Lam x (App (Var f) (Lam y (App (App (Var x) (Var x)) (Var y))))))))
-     (nameless
-      ((Abs
-        (App (Abs (App (Var 1) (Abs (App (App (Var 1) (Var 1)) (Var 0)))))
-         (Abs (App (Var 1) (Abs (App (App (Var 1) (Var 1)) (Var 0)))))))))
+    ((nameless ((abs ((abs (1 (abs ((1 1) 0)))) (abs (1 (abs ((1 1) 0))))))))
      (renamed
-      ((Lam x.0
-        (App
-         (Lam x.1
-          (App (Var x.0) (Lam x.2 (App (App (Var x.1) (Var x.1)) (Var x.2)))))
-         (Lam x.3
-          (App (Var x.0) (Lam x.4 (App (App (Var x.3) (Var x.3)) (Var x.4))))))))))
+      ((fun x.0 ->
+        ((fun x.1 -> (x.0 (fun x.2 -> ((x.1 x.1) x.2))))
+         (fun x.3 -> (x.0 (fun x.4 -> ((x.3 x.3) x.4)))))))))
     |}];
   (* foo = (λx. (λx. x)) (λx. x) *)
-  test ("x" > ("x" > x) $ ("x" > x));
+  test "((fun x -> fun x -> x) (fun x -> x))";
   [%expect
     {|
-    ((original (App (Lam x (Lam x (Var x))) (Lam x (Var x))))
-     (nameless ((App (Abs (Abs (Var 0))) (Abs (Var 0)))))
-     (renamed ((App (Lam x.0 (Lam x.1 (Var x.1))) (Lam x.2 (Var x.2))))))
+    ((nameless (((abs (abs 0)) (abs 0))))
+     (renamed (((fun x.0 -> (fun x.1 -> x.1)) (fun x.2 -> x.2)))))
     |}]
 ;;
 
@@ -174,10 +177,11 @@ let%quick_test "quickcheck round trip restore and remove names" =
     Option.value result ~default:true)
 ;;
 
-open Untyped_lambda_calculus.Syntax
 
-let print ctx t =
+let test ctx t =
   t
+  |> Sexp.of_string
+  |> U.t_of_sexp
   |> remove_names ctx
   |> Option.value_exn
   |> eval
@@ -187,37 +191,37 @@ let print ctx t =
 ;;
 
 let%expect_test "eval simple" =
-  print [ "x" ] @@ v "x";
-  [%expect "(Var 0)"];
-  print [ "x" ] @@ ("x" > v "x" $ v "x");
-  [%expect "(Var 0)"]
+  test [ "x" ] "x";
+  [%expect "0"];
+  test [ "x" ] "(fun x -> x x)";
+  [%expect "(abs (0 0))"]
 ;;
 
-(* We test with [gamma = [ "f"; "t" ]], so ["f" = Var 0] and ["t" = Var 1] *)
 let%expect_test "eval booleans" =
-  let tru = "t" > ("f" > v "t") in
-  let fls = "t" > ("f" > v "f") in
-  let andb = "b" > ("c" > (v "b" $ v "c" $ fls)) in
-  let test b =
-    let test = "l" > ("m" > ("n" > (v "l" $ v "m" $ v "n"))) in
-    print [ "f"; "t" ] (test $ b $ v "t" $ v "f")
+  let tru = "(fun t -> fun f -> t)" in
+  let fls = "(fun t -> fun f -> f)" in
+  let andb = [%string "(fun b -> fun c -> b c %{fls})"] in
+  let test_branch b =
+    let branch = "(fun l -> fun m -> fun n -> l m n)" in
+    (* We test with [gamma = [ "f"; "t" ]], so ["f" = 0] and ["t" = 1] *)
+    test [ "f"; "t" ] [%string "(%{branch} %{b} t f)"]
   in
-  test tru;
-  test fls;
+  test_branch tru;
+  test_branch fls;
   [%expect
     {|
-    (Var 1)
-    (Var 0)
+    1
+    0
     |}];
-  test (andb $ tru $ tru);
-  test (andb $ tru $ fls);
-  test (andb $ fls $ tru);
-  test (andb $ fls $ fls);
+  test_branch [%string "(%{andb} %{tru} %{tru})"];
+  test_branch [%string "(%{andb} %{tru} %{fls})"];
+  test_branch [%string "(%{andb} %{fls} %{tru})"];
+  test_branch [%string "(%{andb} %{fls} %{fls})"];
   [%expect
     {|
-    (Var 1)
-    (Var 0)
-    (Var 0)
-    (Var 0)
+    1
+    0
+    0
+    0
     |}]
 ;;
