@@ -1,10 +1,4 @@
-type t =
-  | Var of int
-  | Abs of t
-  | App of t * t
-[@@deriving sexp]
-
-type context = string list
+include module type of Types
 
 (** [Exercise 6.1.5] Converts to DeBruijn indices *)
 val remove_names : context -> Untyped_lambda_calculus.t -> t option
