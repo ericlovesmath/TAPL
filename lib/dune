@@ -1,7 +1,8 @@
 (library
  (name TAPL)
- (libraries core)
- (preprocess
-  (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_quick_test ppx_compare ppx_string))
- (inline_tests))
+ (libraries
+   core
+   untyped_lambda_calculus
+   untyped_nameless
+   simply_typed_lambda_calculus))
 
