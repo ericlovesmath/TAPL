@@ -6,6 +6,17 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   match t with
   | EUnit -> Ok TyUnit
   | ETrue | EFalse -> Ok TyBool
+  | ETuple ts ->
+    let%map tys = Or_error.all (List.map ~f:(type_of ctx) ts) in
+    TyTuple tys
+  | EProj (t, i) ->
+    (match%bind type_of ctx t with
+     | TyTuple tys ->
+       (match List.nth tys i with
+        | Some ty -> Ok ty
+        | None ->
+          error_s [%message "tuple projection on invalid index" (tys : ty list) (i : int)])
+     | _ -> error_s [%message "expected tuple to project from" (t : t)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
     if equal_ty ty_t TyUnit
@@ -36,13 +47,13 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   | EApp (f, x) ->
     let%bind ty_f = type_of ctx f in
     (match ty_f with
-     | TyUnit | TyBase _ | TyBool ->
-       error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)]
      | TyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx x in
        if equal_ty ty_arg ty_x
        then Ok ty_body
-       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)])
+       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
+     | TyUnit | TyBase _ | TyBool | TyTuple _ ->
+       error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
     let%bind ty_t = type_of ctx t in
     if equal_ty ty_t ty_annotated
@@ -60,6 +71,7 @@ let test ?(ctx : context = String.Map.empty) (t : string) =
   |> Or_error.sexp_of_t sexp_of_ty
   |> Sexp.to_string_hum
   |> print_endline
+;;
 
 let%expect_test "typechecker tests prior to extending" =
   test "#t";
@@ -98,31 +110,55 @@ let%expect_test "extended typechecker tests" =
   test "(fun x : A -> x)";
   [%expect {| (Ok (A -> A)) |}];
   test "seq";
-  [%expect {| (Ok unit) |}];
   test "(seq #t)";
-  [%expect {| (Ok bool) |}];
   test "(seq #t #t)";
-  [%expect {| (Error ("[ESeq (t, t')] expected t to be unit" (ty_t bool))) |}];
   test "(seq #u #t)";
-  [%expect {| (Ok bool) |}];
-  test "(let x = #t in let f = (fun x : bool -> x) in f x)";
-  [%expect {| (Ok bool) |}];
-  test "(let x = #t in let y = x in y)";
-  [%expect {| (Ok bool) |}];
-  test "(let x = #t in let y = (#t #f) in x)";
-  [%expect {| (Error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
-  test "(let y = x in let x = #t in x)";
-  [%expect {| (Error ("var not in context" x (ctx ()))) |}];
-  test "(#t as bool)";
-  [%expect {| (Ok bool) |}];
-  test "((fun x : bool -> x) as (bool -> bool))";
-  [%expect {| (Ok (bool -> bool)) |}];
-  test "((fun x : bool -> x) as bool)";
   [%expect {|
+    (Ok unit)
+    (Ok bool)
+    (Error ("[ESeq (t, t')] expected t to be unit" (ty_t bool)))
+    (Ok bool)
+    |}];
+  test "(let x = #t in let f = (fun x : bool -> x) in f x)";
+  test "(let x = #t in let y = x in y)";
+  test "(let x = #t in let y = (#t #f) in x)";
+  test "(let y = x in let x = #t in x)";
+  [%expect {|
+    (Ok bool)
+    (Ok bool)
+    (Error ("attempting to apply to non-arrow type" (ty_f bool)))
+    (Error ("var not in context" x (ctx ())))
+    |}];
+  test "(#t as bool)";
+  test "((fun x : bool -> x) as (bool -> bool))";
+  test "((fun x : bool -> x) as bool)";
+  [%expect
+    {|
+    (Ok bool)
+    (Ok (bool -> bool))
     (Error
      ("annotated and derived type differ" (ty_t (bool -> bool))
       (ty_annotated bool)))
     |}];
   test "((fun x : A -> x) as (A -> A))";
   [%expect {| (Ok (A -> A)) |}];
+  let tup = "({ #t , (fun x : bool -> x) , #f })" in
+  test tup;
+  [%expect {| (Ok ({ bool , (bool -> bool) , bool })) |}];
+  test [%string "(%{tup} . 0)"];
+  test [%string "(%{tup} . 1)"];
+  test [%string "(%{tup} . 2)"];
+  test [%string "(%{tup} . -1)"];
+  test [%string "(%{tup} . 3)"];
+  [%expect
+    {|
+    (Ok bool)
+    (Ok (bool -> bool))
+    (Ok bool)
+    (Error
+     ("tuple projection on invalid index" (tys (bool (bool -> bool) bool))
+      (i -1)))
+    (Error
+     ("tuple projection on invalid index" (tys (bool (bool -> bool) bool)) (i 3)))
+    |}]
 ;;

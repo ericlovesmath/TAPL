@@ -27,13 +27,5 @@ let t_of_sexp sexp =
 ;;
 
 let%quick_test "quickcheck round trip sexp parser" =
-  fun (t : t) ->
-  (* TODO: [@quickcheck.generator String.gen_nonempty] isn't working? Fix *)
-  let rec is_valid = function
-    | Var "" | Lam ("", _) -> false
-    | Var _ -> true
-    | Lam (_, t) -> is_valid t
-    | App (f, x) -> is_valid f && is_valid x
-  in
-  if is_valid t then assert (equal t (t_of_sexp (sexp_of_t t)))
+  fun (t : t) -> assert (equal t (t_of_sexp (sexp_of_t t)))
 ;;

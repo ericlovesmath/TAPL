@@ -2,9 +2,10 @@ open Core
 open Sexplib.Sexp
 
 type ty =
-  | TyBase of char
+  | TyBase of (char[@quickcheck.generator Char.gen_uppercase])
   | TyUnit
   | TyBool
+  | TyTuple of ty list
   | TyArrow of ty * ty
 [@@deriving equal, quickcheck]
 
@@ -12,6 +13,11 @@ let rec sexp_of_ty = function
   | TyBase c -> Atom (String.of_char c)
   | TyUnit -> Atom "unit"
   | TyBool -> Atom "bool"
+  | TyTuple tys ->
+    List
+      ([ Atom "{" ]
+       @ List.intersperse ~sep:(Atom ",") (List.map ~f:sexp_of_ty tys)
+       @ [ Atom "}" ])
   | TyArrow (a, b) -> List [ sexp_of_ty a; Atom "->"; sexp_of_ty b ]
 ;;
 
@@ -23,6 +29,14 @@ let ty_of_sexp sexp =
     | Atom c when String.length c = 1 -> TyBase (Char.of_string c)
     | Atom a -> fail [%message "Unknown atom" a]
     | List [ x ] -> parse x
+    | List (Atom "{" :: rest as tup) ->
+      let rec parse_tuple_tail = function
+        | [ Atom "}" ] -> []
+        | [ ty; Atom "}" ] -> [ parse ty ]
+        | ty :: Atom "," :: rest -> parse ty :: parse_tuple_tail rest
+        | _ -> fail [%message "Unknown tuple form" (tup : Sexp.t list)]
+      in
+      TyTuple (parse_tuple_tail rest)
     | List (x :: Atom "->" :: rest) ->
       let left = parse x in
       let right = parse (List rest) in
@@ -41,10 +55,12 @@ type t =
   | EUnit
   | ETrue
   | EFalse
+  | ETuple of t list
+  | EProj of t * int
   | ESeq of t * t
   | EIf of t * t * t
   | ELet of string * t * t
-  | EVar of string
+  | EVar of (string[@quickcheck.generator String.gen_with_length 5 Char.gen_alpha])
   | EAbs of string * ty * t
   | EApp of t * t
   | EAs of t * ty
@@ -55,6 +71,12 @@ let sexp_of_t t =
     | EUnit -> Atom "#u"
     | ETrue -> Atom "#t"
     | EFalse -> Atom "#f"
+    | ETuple ts ->
+      List
+        ([ Atom "{" ]
+         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse ts)
+         @ [ Atom "}" ])
+    | EProj (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
     | ESeq (t, t') -> List [ Atom "seq"; parse t; parse t' ]
     | EIf (c, t, f) -> List [ Atom "if"; parse c; parse t; parse f ]
     | ELet (v, b, t) -> List [ Atom "let"; Atom v; Atom "="; parse b; Atom "in"; parse t ]
@@ -75,6 +97,18 @@ let t_of_sexp sexp =
     | Atom "#f" -> EFalse
     | Atom v -> EVar v
     | List [ x ] -> parse x
+    | List (Atom "{" :: rest as tup) ->
+      let rec parse_tuple_tail = function
+        | [ Atom "}" ] -> []
+        | [ ty; Atom "}" ] -> [ parse ty ]
+        | ty :: Atom "," :: rest -> parse ty :: parse_tuple_tail rest
+        | _ -> fail [%message "Unknown tuple form" (tup : Sexp.t list)]
+      in
+      ETuple (parse_tuple_tail rest)
+    | List [ t; Atom "."; Atom i ] ->
+      (match Int.of_string_opt i with
+       | None -> fail [%message "expected tuple projected by const int" i]
+       | Some i -> EProj (parse t, i))
     | List [ Atom "seq"; t ] -> parse t
     | List (Atom "seq" :: hd :: tl) -> ESeq (parse hd, parse (List (Atom "seq" :: tl)))
     | List [ Atom "if"; c; t; f ] -> EIf (parse c, parse t, parse f)

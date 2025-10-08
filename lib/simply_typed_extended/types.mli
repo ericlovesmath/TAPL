@@ -4,6 +4,7 @@ type ty =
   | TyBase of char
   | TyUnit
   | TyBool
+  | TyTuple of ty list
   | TyArrow of ty * ty
 [@@deriving sexp, equal]
 
@@ -12,6 +13,8 @@ type t =
   | EUnit
   | ETrue
   | EFalse
+  | ETuple of t list
+  | EProj of t * int
   | ESeq of t * t
   | EIf of t * t * t
   | ELet of string * t * t
