@@ -70,12 +70,13 @@ let sexp_of_t t =
 let t_of_sexp sexp =
   let fail = Fn.compose failwith Sexp.to_string in
   let rec parse = function
-    | Atom "#u" -> EUnit
+    | Atom "#u" | Atom "seq" -> EUnit
     | Atom "#t" -> ETrue
     | Atom "#f" -> EFalse
     | Atom v -> EVar v
     | List [ x ] -> parse x
-    | List [ Atom "seq"; t; t' ] -> ESeq (parse t, parse t')
+    | List [ Atom "seq"; t ] -> parse t
+    | List (Atom "seq" :: hd :: tl) -> ESeq (parse hd, parse (List (Atom "seq" :: tl)))
     | List [ Atom "if"; c; t; f ] -> EIf (parse c, parse t, parse f)
     | List (Atom "let" :: Atom v :: Atom "=" :: b :: Atom "in" :: t) ->
       ELet (v, parse b, parse (List t))

@@ -97,7 +97,32 @@ let%expect_test "extended typechecker tests" =
   [%expect {| (Ok unit) |}];
   test "(fun x : A -> x)";
   [%expect {| (Ok (A -> A)) |}];
-  (* TODO: Add ESeq tests *)
-  (* TODO: Add ELet tests *)
-  (* TODO: Add EAs tests *)
+  test "seq";
+  [%expect {| (Ok unit) |}];
+  test "(seq #t)";
+  [%expect {| (Ok bool) |}];
+  test "(seq #t #t)";
+  [%expect {| (Error ("[ESeq (t, t')] expected t to be unit" (ty_t bool))) |}];
+  test "(seq #u #t)";
+  [%expect {| (Ok bool) |}];
+  test "(let x = #t in let f = (fun x : bool -> x) in f x)";
+  [%expect {| (Ok bool) |}];
+  test "(let x = #t in let y = x in y)";
+  [%expect {| (Ok bool) |}];
+  test "(let x = #t in let y = (#t #f) in x)";
+  [%expect {| (Error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
+  test "(let y = x in let x = #t in x)";
+  [%expect {| (Error ("var not in context" x (ctx ()))) |}];
+  test "(#t as bool)";
+  [%expect {| (Ok bool) |}];
+  test "((fun x : bool -> x) as (bool -> bool))";
+  [%expect {| (Ok (bool -> bool)) |}];
+  test "((fun x : bool -> x) as bool)";
+  [%expect {|
+    (Error
+     ("annotated and derived type differ" (ty_t (bool -> bool))
+      (ty_annotated bool)))
+    |}];
+  test "((fun x : A -> x) as (A -> A))";
+  [%expect {| (Ok (A -> A)) |}];
 ;;
