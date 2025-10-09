@@ -7,11 +7,19 @@ type ty =
   | TyBool
   | TyTuple of ty list
   | TyRecord of (string * ty) list
+  | TyVariant of (string * ty) list
   | TyArrow of ty * ty
 [@@deriving equal, quickcheck]
 
 let sexp_of_ty ty =
-  let rec parse = function
+  let rec parse =
+    let sexp_of_fields fields =
+      fields
+      |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
+      |> List.intersperse ~sep:[ Atom "," ]
+      |> List.concat
+    in
+    function
     | TyBase c -> Atom (String.of_char c)
     | TyUnit -> Atom "unit"
     | TyBool -> Atom "bool"
@@ -20,14 +28,8 @@ let sexp_of_ty ty =
         ([ Atom "{" ]
          @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse tys)
          @ [ Atom "}" ])
-    | TyRecord record ->
-      let fields_sexp =
-        record
-        |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
-        |> List.intersperse ~sep:[ Atom "," ]
-        |> List.concat
-      in
-      List ([ Atom "|" ] @ fields_sexp @ [ Atom "|" ])
+    | TyRecord record -> List ([ Atom "|" ] @ sexp_of_fields record @ [ Atom "|" ])
+    | TyVariant vs -> List ([ Atom "<" ] @ sexp_of_fields vs @ [ Atom ">" ])
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
   in
   parse ty
@@ -49,15 +51,26 @@ let ty_of_sexp sexp =
         | _ -> fail [%message "Unknown tuple form" (tup : Sexp.t list)]
       in
       TyTuple (parse_tuple_tail rest)
-    | List (Atom "|" :: rest as tup) ->
+    | List (Atom "|" :: rest as record) ->
       let rec parse_record_tail = function
         | [ Atom "|" ] -> []
         | [ Atom l; Atom ":"; ty; Atom "|" ] -> [ l, parse ty ]
         | Atom l :: Atom ":" :: ty :: Atom "," :: rest ->
           (l, parse ty) :: parse_record_tail rest
-        | _ -> fail [%message "Unknown tuple form" (tup : Sexp.t list)]
+        | _ -> fail [%message "Unknown record form" (record : Sexp.t list)]
       in
       TyRecord (parse_record_tail rest)
+    | List (Atom "<" :: rest as variant) ->
+      let rec parse_variant_tail = function
+        | [ Atom ">" ] -> []
+        | [ Atom l; Atom ">" ] -> [ l, TyUnit ]
+        | [ Atom l; Atom ":"; ty; Atom ">" ] -> [ l, parse ty ]
+        | Atom l :: Atom "," :: rest -> (l, TyUnit) :: parse_variant_tail rest
+        | Atom l :: Atom ":" :: ty :: Atom "," :: rest ->
+          (l, parse ty) :: parse_variant_tail rest
+        | _ -> fail [%message "Unknown variant form" (variant : Sexp.t list)]
+      in
+      TyVariant (parse_variant_tail rest)
     | List (x :: Atom "->" :: rest) ->
       let left = parse x in
       let right = parse (List rest) in
@@ -82,6 +95,8 @@ type t =
   | EProjTuple of t * int
   | ERecord of ((string[@generator gen_label]) * t) list
   | EProjRecord of t * (string[@generator gen_label])
+  | EVariant of (string[@generator gen_label]) * ty * t
+  | EMatch of t * (string * string * t) list
   | ESeq of t * t
   | EIf of t * t * t
   | ELet of (string[@generator gen_label]) * t * t
@@ -92,7 +107,14 @@ type t =
 [@@deriving equal, quickcheck]
 
 let sexp_of_t t =
-  let rec parse = function
+  let rec parse =
+    let sexp_of_fields fields =
+      fields
+      |> List.map ~f:(fun (l, t) -> [ Atom l; Atom ":"; parse t ])
+      |> List.intersperse ~sep:[ Atom "," ]
+      |> List.concat
+    in
+    function
     | EUnit -> Atom "#u"
     | ETrue -> Atom "#t"
     | EFalse -> Atom "#f"
@@ -102,15 +124,13 @@ let sexp_of_t t =
          @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse ts)
          @ [ Atom "}" ])
     | EProjTuple (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
-    | ERecord record ->
-      let fields_sexp =
-        record
-        |> List.map ~f:(fun (l, t) -> [ Atom l; Atom ":"; parse t ])
-        |> List.intersperse ~sep:[ Atom "," ]
-        |> List.concat
-      in
-      List ([ Atom "|" ] @ fields_sexp @ [ Atom "|" ])
+    | ERecord record -> List ([ Atom "|" ] @ sexp_of_fields record @ [ Atom "|" ])
     | EProjRecord (t, l) -> List [ parse t; Atom "."; Atom l ]
+    | EVariant (l, ty, t) ->
+      List [ Atom "<"; Atom l; Atom ":"; parse t; Atom ">"; Atom "as"; sexp_of_ty ty ]
+    | EMatch (t, cases) ->
+      let sexp_of_case (l, v, t) = List [ Atom l; Atom v; Atom "=>"; parse t ] in
+      List ([ Atom "case"; parse t; Atom "of" ] @ List.map cases ~f:sexp_of_case)
     | ESeq (t, t') -> List [ Atom "seq"; parse t; parse t' ]
     | EIf (c, t, f) -> List [ Atom "if"; parse c; parse t; parse f ]
     | ELet (v, b, t) -> List [ Atom "let"; Atom v; Atom "="; parse b; Atom "in"; parse t ]
@@ -148,6 +168,17 @@ let t_of_sexp sexp =
         | _ -> fail [%message "Unknown tuple form" (tup : Sexp.t list)]
       in
       ERecord (parse_record_tail rest)
+    | List [ Atom "<"; Atom l; Atom ":"; t; Atom ">"; Atom "as"; ty ] ->
+      EVariant (l, ty_of_sexp ty, parse t)
+    | List [ Atom "<"; Atom l; Atom ">"; Atom "as"; ty ] ->
+      EVariant (l, ty_of_sexp ty, EUnit)
+    | List (Atom "case" :: t :: Atom "of" :: cases) ->
+      let case_of_sexp = function
+        | List (Atom l :: Atom v :: Atom "=>" :: t) -> l, v, parse (List t)
+        | List (Atom l :: Atom "=>" :: t) -> l, "$ignore", parse (List t)
+        | case -> fail [%message "unexpected case" (case : Sexp.t)]
+      in
+      EMatch (parse t, List.map ~f:case_of_sexp cases)
     | List [ t; Atom "."; Atom l ] ->
       (match Int.of_string_opt l with
        | Some i -> EProjTuple (parse t, i)

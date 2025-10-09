@@ -33,6 +33,36 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
           error_s
             [%message "record missing field" (tys : (string * ty) list) (l : string)])
      | _ -> error_s [%message "expected record to project from" (t : t)])
+  | EVariant (l, ty, t) ->
+    (match ty with
+     | TyVariant tys ->
+       (match List.Assoc.find tys l ~equal:String.equal with
+        | Some ty_anno ->
+          let%bind ty_infer = type_of ctx t in
+          if equal_ty ty_infer ty_anno
+          then Ok ty
+          else error_s [%message "incorrect variant type" (ty_infer : ty) (ty_anno : ty)]
+        | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)])
+     | _ -> error_s [%message "expected annotation to be a variant" (ty : ty)])
+  | EMatch (t, cases) ->
+    let%bind ty = type_of ctx t in
+    (match ty with
+     | TyVariant tys ->
+       let ty_of_case (l, v, t) =
+         match List.Assoc.find tys l ~equal:String.equal with
+         | Some ty ->
+           let ctx = Map.set ctx ~key:v ~data:ty in
+           type_of ctx t
+         | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)]
+       in
+       let%bind ty_cases = Or_error.all (List.map ~f:ty_of_case cases) in
+       (match ty_cases with
+        | [] -> error_s (Atom "case statement needs to have at least one branch")
+        | hd :: tl ->
+          if List.for_all tl ~f:(equal_ty hd)
+          then Ok hd
+          else error_s [%message "unequal types across branches" (ty_cases : ty list)])
+     | _ -> error_s [%message "expected match on variant" (ty : ty)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
     if equal_ty ty_t TyUnit
@@ -68,8 +98,7 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
        if equal_ty ty_arg ty_x
        then Ok ty_body
        else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
-     | TyUnit | TyBase _ | TyBool | TyTuple _ | TyRecord _ ->
-       error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
+     | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
     let%bind ty_t = type_of ctx t in
     if equal_ty ty_t ty_annotated
@@ -185,7 +214,8 @@ let%expect_test "extended typechecker tests" =
   test [%string "(%{record} . two)"];
   test [%string "((%{record} . two) . nest)"];
   test [%string "(((%{record} . two) . nest) #t)"];
-  [%expect {|
+  [%expect
+    {|
     (Ok (| one : bool , two : (| nest : (bool -> bool) |) |))
     (Ok bool)
     (Ok (| nest : (bool -> bool) |))
@@ -193,9 +223,42 @@ let%expect_test "extended typechecker tests" =
     (Ok bool)
     |}];
   test [%string "(%{record} . three)"];
-  [%expect {|
+  [%expect
+    {|
     (Error
      ("record missing field" (tys ((one bool) (two (| nest : (bool -> bool) |))))
       (l three)))
+  |}];
+  let option = "(< some : bool , none >)" in
+  test [%string "(< none > as %{option})"];
+  test [%string "(< some : #t > as %{option})"];
+  [%expect
+    {|
+    (Ok (< some : bool , none : unit >))
+    (Ok (< some : bool , none : unit >))
     |}];
+  test [%string "(< some : #u > as %{option})"];
+  [%expect {| (Error ("incorrect variant type" (ty_infer unit) (ty_anno bool))) |}];
+  test [%string "(< else : #t > as %{option})"];
+  [%expect
+    {|
+    (Error
+     ("field missing in variant" (ty (< some : bool , none : unit >)) (l else)))
+  |}];
+  let some_true = [%string "(< some : #t > as %{option})"] in
+  test [%string "(case %{some_true} of (some x => x) (none => #t))"];
+  [%expect {| (Ok bool) |}];
+  test [%string "(case %{some_true} of (some x => x) (none => #u))"];
+  [%expect
+    {| (Error ("unequal types across branches" (ty_cases (bool unit)))) |}];
+  test [%string "(case %{some_true} of )"];
+  (* TODO: Check for exhaustiveness and duplicated cases *)
+  test [%string "(case %{some_true} of (some x => #t))"];
+  test [%string "(case %{some_true} of (some x => #t) (some x => #t) (none => #t))"];
+  [%expect
+    {|
+    (Error "case statement needs to have at least one branch")
+    (Ok bool)
+    (Ok bool)
+    |}]
 ;;
