@@ -4,11 +4,14 @@ type ty =
   | TyBase of char
   | TyUnit
   | TyBool
+  | TyNat
   | TyTuple of ty list
   | TyRecord of (string * ty) list
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
 [@@deriving sexp, equal]
+
+module Ty : Comparable.S with type t := ty
 
 (* Church-style simply typed lambda calculus *)
 type t =
@@ -28,6 +31,10 @@ type t =
   | EAbs of string * ty * t
   | EApp of t * t
   | EAs of t * ty
+  | EZero
+  | ESucc of t
+  | EPred of t
+  | EIsZero of t
 [@@deriving sexp]
 
 type context = ty String.Map.t [@@deriving sexp]

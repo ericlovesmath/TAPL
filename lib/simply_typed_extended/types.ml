@@ -5,11 +5,12 @@ type ty =
   | TyBase of (char[@generator Char.gen_uppercase])
   | TyUnit
   | TyBool
+  | TyNat
   | TyTuple of ty list
   | TyRecord of (string * ty) list
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
-[@@deriving equal, quickcheck]
+[@@deriving compare, equal, quickcheck]
 
 let sexp_of_ty ty =
   let rec parse =
@@ -23,6 +24,7 @@ let sexp_of_ty ty =
     | TyBase c -> Atom (String.of_char c)
     | TyUnit -> Atom "unit"
     | TyBool -> Atom "bool"
+    | TyNat -> Atom "nat"
     | TyTuple tys ->
       List
         ([ Atom "{" ]
@@ -40,6 +42,7 @@ let ty_of_sexp sexp =
   let rec parse = function
     | Atom "unit" -> TyUnit
     | Atom "bool" -> TyBool
+    | Atom "nat" -> TyNat
     | Atom c when String.length c = 1 -> TyBase (Char.of_string c)
     | Atom a -> fail [%message "Unknown atom" a]
     | List [ x ] -> parse x
@@ -80,6 +83,14 @@ let ty_of_sexp sexp =
   parse sexp
 ;;
 
+module Ty = Comparable.Make (struct
+    type nonrec t = ty
+
+    let compare = compare_ty
+    let sexp_of_t = sexp_of_ty
+    let t_of_sexp = ty_of_sexp
+  end)
+
 let%quick_test "quickcheck round trip sexp parser ty" =
   fun (ty : ty) -> assert (equal_ty ty (ty_of_sexp (sexp_of_ty ty)))
 ;;
@@ -104,6 +115,10 @@ type t =
   | EAbs of string * ty * t
   | EApp of t * t
   | EAs of t * ty
+  | EZero
+  | ESucc of t
+  | EPred of t
+  | EIsZero of t
 [@@deriving equal, quickcheck]
 
 let sexp_of_t t =
@@ -139,6 +154,10 @@ let sexp_of_t t =
       List [ Atom "fun"; Atom v; Atom ":"; sexp_of_ty ty; Atom "->"; parse t ]
     | EApp (f, x) -> List [ parse f; parse x ]
     | EAs (t, ty) -> List [ parse t; Atom "as"; sexp_of_ty ty ]
+    | EZero -> Atom "0"
+    | ESucc t -> List [ Atom "succ"; parse t ]
+    | EPred t -> List [ Atom "pred"; parse t ]
+    | EIsZero t -> List [ Atom "iszero"; parse t ]
   in
   parse t
 ;;
@@ -149,6 +168,7 @@ let t_of_sexp sexp =
     | Atom "#u" | Atom "seq" -> EUnit
     | Atom "#t" -> ETrue
     | Atom "#f" -> EFalse
+    | Atom "0" -> EZero
     | Atom v -> EVar v
     | List [ x ] -> parse x
     | List (Atom "{" :: rest as tup) ->
@@ -191,6 +211,9 @@ let t_of_sexp sexp =
     | List (Atom "fun" :: Atom v :: Atom ":" :: ty :: Atom "->" :: body) ->
       EAbs (v, ty_of_sexp ty, parse (List body))
     | List [ t; Atom "as"; ty ] -> EAs (parse t, ty_of_sexp ty)
+    | List [ Atom "succ"; t ] -> ESucc (parse t)
+    | List [ Atom "pred"; t ] -> EPred (parse t)
+    | List [ Atom "iszero"; t ] -> EIsZero (parse t)
     | List (h :: t) -> List.fold_left ~f:(fun f x -> EApp (f, parse x)) ~init:(parse h) t
     | List xs -> fail [%message "Unknown list" (xs : Sexp.t list)]
   in

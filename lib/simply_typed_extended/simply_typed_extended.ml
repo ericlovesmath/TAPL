@@ -106,6 +106,19 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
     else
       error_s
         [%message "annotated and derived type differ" (ty_t : ty) (ty_annotated : ty)]
+  | EZero -> Ok TyNat
+  | ESucc t ->
+    (match%bind type_of ctx t with
+     | TyNat -> Ok TyNat
+     | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty)])
+  | EPred t ->
+    (match%bind type_of ctx t with
+     | TyNat -> Ok TyNat
+     | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty)])
+  | EIsZero t ->
+    (match%bind type_of ctx t with
+     | TyNat -> Ok TyBool
+     | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
 ;;
 
 let test ?(ctx : context = String.Map.empty) (t : string) =
@@ -249,8 +262,7 @@ let%expect_test "extended typechecker tests" =
   test [%string "(case %{some_true} of (some x => x) (none => #t))"];
   [%expect {| (Ok bool) |}];
   test [%string "(case %{some_true} of (some x => x) (none => #u))"];
-  [%expect
-    {| (Error ("unequal types across branches" (ty_cases (bool unit)))) |}];
+  [%expect {| (Error ("unequal types across branches" (ty_cases (bool unit)))) |}];
   test [%string "(case %{some_true} of )"];
   (* TODO: Check for exhaustiveness and duplicated cases *)
   test [%string "(case %{some_true} of (some x => #t))"];
@@ -260,5 +272,43 @@ let%expect_test "extended typechecker tests" =
     (Error "case statement needs to have at least one branch")
     (Ok bool)
     (Ok bool)
-    |}]
+     |}];
+  test "0";
+  test "(succ 0)";
+  test "(succ (pred (succ 0)))";
+  test "(iszero (pred (succ 0)))";
+  test "(if (iszero 0) #t #f)";
+  test "(succ #t)";
+  [%expect {|
+    (Ok nat)
+    (Ok nat)
+    (Ok nat)
+    (Ok bool)
+    (Ok bool)
+    (Error ("expected succ to take nat" (ty_t bool)))
+    |}];
+;;
+
+let%expect_test "cool examples" =
+  let weekday = "(< mon , tue , wed , thu , fri >)" in
+  test
+    [%string
+      {|
+      (let next =
+        (fun w : %{weekday} ->
+          case w of
+            (mon => (< tue > as %{weekday}))
+            (tue => (< wed > as %{weekday}))
+            (wed => (< thu > as %{weekday}))
+            (thu => (< fri > as %{weekday}))
+            (fri => (< mon > as %{weekday})))
+       in
+       next)
+      |}];
+  [%expect
+    {|
+    (Ok
+     ((< mon : unit , tue : unit , wed : unit , thu : unit , fri : unit >) ->
+      (< mon : unit , tue : unit , wed : unit , thu : unit , fri : unit >)))
+     |}];
 ;;
