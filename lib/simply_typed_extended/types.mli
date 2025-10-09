@@ -5,6 +5,7 @@ type ty =
   | TyUnit
   | TyBool
   | TyTuple of ty list
+  | TyRecord of (string * ty) list
   | TyArrow of ty * ty
 [@@deriving sexp, equal]
 
@@ -14,7 +15,9 @@ type t =
   | ETrue
   | EFalse
   | ETuple of t list
-  | EProj of t * int
+  | EProjTuple of t * int
+  | ERecord of (string * t) list
+  | EProjRecord of t * string
   | ESeq of t * t
   | EIf of t * t * t
   | ELet of string * t * t

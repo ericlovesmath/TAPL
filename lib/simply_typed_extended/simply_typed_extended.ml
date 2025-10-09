@@ -9,7 +9,14 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   | ETuple ts ->
     let%map tys = Or_error.all (List.map ~f:(type_of ctx) ts) in
     TyTuple tys
-  | EProj (t, i) ->
+  | ERecord record ->
+    let type_of_field (l, t) =
+      let%map ty = type_of ctx t in
+      l, ty
+    in
+    let%map fields = Or_error.all (List.map ~f:type_of_field record) in
+    TyRecord fields
+  | EProjTuple (t, i) ->
     (match%bind type_of ctx t with
      | TyTuple tys ->
        (match List.nth tys i with
@@ -17,6 +24,15 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
         | None ->
           error_s [%message "tuple projection on invalid index" (tys : ty list) (i : int)])
      | _ -> error_s [%message "expected tuple to project from" (t : t)])
+  | EProjRecord (t, l) ->
+    (match%bind type_of ctx t with
+     | TyRecord tys ->
+       (match List.Assoc.find tys l ~equal:String.equal with
+        | Some ty -> Ok ty
+        | None ->
+          error_s
+            [%message "record missing field" (tys : (string * ty) list) (l : string)])
+     | _ -> error_s [%message "expected record to project from" (t : t)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
     if equal_ty ty_t TyUnit
@@ -52,7 +68,7 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
        if equal_ty ty_arg ty_x
        then Ok ty_body
        else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
-     | TyUnit | TyBase _ | TyBool | TyTuple _ ->
+     | TyUnit | TyBase _ | TyBool | TyTuple _ | TyRecord _ ->
        error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
     let%bind ty_t = type_of ctx t in
@@ -113,7 +129,8 @@ let%expect_test "extended typechecker tests" =
   test "(seq #t)";
   test "(seq #t #t)";
   test "(seq #u #t)";
-  [%expect {|
+  [%expect
+    {|
     (Ok unit)
     (Ok bool)
     (Error ("[ESeq (t, t')] expected t to be unit" (ty_t bool)))
@@ -123,7 +140,8 @@ let%expect_test "extended typechecker tests" =
   test "(let x = #t in let y = x in y)";
   test "(let x = #t in let y = (#t #f) in x)";
   test "(let y = x in let x = #t in x)";
-  [%expect {|
+  [%expect
+    {|
     (Ok bool)
     (Ok bool)
     (Error ("attempting to apply to non-arrow type" (ty_f bool)))
@@ -160,5 +178,24 @@ let%expect_test "extended typechecker tests" =
       (i -1)))
     (Error
      ("tuple projection on invalid index" (tys (bool (bool -> bool) bool)) (i 3)))
-    |}]
+  |}];
+  let record = "(| one : #t , two : (| nest : (fun x : bool -> x) |) |)" in
+  test record;
+  test [%string "(%{record} . one)"];
+  test [%string "(%{record} . two)"];
+  test [%string "((%{record} . two) . nest)"];
+  test [%string "(((%{record} . two) . nest) #t)"];
+  [%expect {|
+    (Ok (| one : bool , two : (| nest : (bool -> bool) |) |))
+    (Ok bool)
+    (Ok (| nest : (bool -> bool) |))
+    (Ok (bool -> bool))
+    (Ok bool)
+    |}];
+  test [%string "(%{record} . three)"];
+  [%expect {|
+    (Error
+     ("record missing field" (tys ((one bool) (two (| nest : (bool -> bool) |))))
+      (l three)))
+    |}];
 ;;
