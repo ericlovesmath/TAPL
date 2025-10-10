@@ -1,6 +1,12 @@
 open Core
 include Types
 
+let assert_unique_fields fields =
+  if Set.length (String.Set.of_list fields) = List.length fields
+  then Ok ()
+  else error_s [%message "duplicated labels in fields" (fields : string list)]
+;;
+
 let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   let open Or_error.Let_syntax in
   match t with
@@ -14,8 +20,9 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
       let%map ty = type_of ctx t in
       l, ty
     in
-    let%map fields = Or_error.all (List.map ~f:type_of_field record) in
-    TyRecord fields
+    let%bind fields = Or_error.all (List.map ~f:type_of_field record) in
+    let%bind () = assert_unique_fields (List.map ~f:fst fields) in
+    Ok (TyRecord fields)
   | EProjTuple (t, i) ->
     (match%bind type_of ctx t with
      | TyTuple tys ->
@@ -27,6 +34,7 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   | EProjRecord (t, l) ->
     (match%bind type_of ctx t with
      | TyRecord tys ->
+       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
         | Some ty -> Ok ty
         | None ->
@@ -36,6 +44,7 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   | EVariant (l, ty, t) ->
     (match ty with
      | TyVariant tys ->
+       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
         | Some ty_anno ->
           let%bind ty_infer = type_of ctx t in
@@ -48,6 +57,19 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
     let%bind ty = type_of ctx t in
     (match ty with
      | TyVariant tys ->
+       let case_labels = List.map ~f:(fun (l, _, _) -> l) cases in
+       let%bind () = assert_unique_fields case_labels in
+       let%bind () =
+         let variant_labels = List.map ~f:fst tys in
+         if String.Set.(equal (of_list case_labels) (of_list variant_labels))
+         then Ok ()
+         else
+           error_s
+             [%message
+               "unexpected cases for variant"
+                 (case_labels : string list)
+                 (variant_labels : string list)]
+       in
        let ty_of_case (l, v, t) =
          match List.Assoc.find tys l ~equal:String.equal with
          | Some ty ->
@@ -245,48 +267,55 @@ let%expect_test "extended typechecker tests" =
   let option = "(< some : bool , none >)" in
   test [%string "(< none > as %{option})"];
   test [%string "(< some : #t > as %{option})"];
+  test [%string "(< some : #t > as %{option})"];
   [%expect
     {|
-    (Ok (< some : bool , none : unit >))
-    (Ok (< some : bool , none : unit >))
+    (Ok (< some : bool , none >))
+    (Ok (< some : bool , none >))
+    (Ok (< some : bool , none >))
     |}];
   test [%string "(< some : #u > as %{option})"];
-  [%expect {| (Error ("incorrect variant type" (ty_infer unit) (ty_anno bool))) |}];
   test [%string "(< else : #t > as %{option})"];
+  test [%string "(< some : #t > as (< some : bool , some : bool >))"];
   [%expect
     {|
-    (Error
-     ("field missing in variant" (ty (< some : bool , none : unit >)) (l else)))
-  |}];
+    (Error ("incorrect variant type" (ty_infer unit) (ty_anno bool)))
+    (Error ("field missing in variant" (ty (< some : bool , none >)) (l else)))
+    (Error ("duplicated labels in fields" (fields (some some))))
+    |}];
   let some_true = [%string "(< some : #t > as %{option})"] in
   test [%string "(case %{some_true} of (some x => x) (none => #t))"];
   [%expect {| (Ok bool) |}];
   test [%string "(case %{some_true} of (some x => x) (none => #u))"];
   [%expect {| (Error ("unequal types across branches" (ty_cases (bool unit)))) |}];
   test [%string "(case %{some_true} of )"];
-  (* TODO: Check for exhaustiveness and duplicated cases *)
   test [%string "(case %{some_true} of (some x => #t))"];
   test [%string "(case %{some_true} of (some x => #t) (some x => #t) (none => #t))"];
   [%expect
     {|
-    (Error "case statement needs to have at least one branch")
-    (Ok bool)
-    (Ok bool)
-     |}];
+    (Error
+     ("unexpected cases for variant" (case_labels ())
+      (variant_labels (some none))))
+    (Error
+     ("unexpected cases for variant" (case_labels (some))
+      (variant_labels (some none))))
+    (Error ("duplicated labels in fields" (fields (some some none))))
+    |}];
   test "0";
   test "(succ 0)";
   test "(succ (pred (succ 0)))";
   test "(iszero (pred (succ 0)))";
   test "(if (iszero 0) #t #f)";
   test "(succ #t)";
-  [%expect {|
+  [%expect
+    {|
     (Ok nat)
     (Ok nat)
     (Ok nat)
     (Ok bool)
     (Ok bool)
     (Error ("expected succ to take nat" (ty_t bool)))
-    |}];
+    |}]
 ;;
 
 let%expect_test "cool examples" =
@@ -306,9 +335,5 @@ let%expect_test "cool examples" =
        next)
       |}];
   [%expect
-    {|
-    (Ok
-     ((< mon : unit , tue : unit , wed : unit , thu : unit , fri : unit >) ->
-      (< mon : unit , tue : unit , wed : unit , thu : unit , fri : unit >)))
-     |}];
+    {| (Ok ((< mon , tue , wed , thu , fri >) -> (< mon , tue , wed , thu , fri >))) |}]
 ;;

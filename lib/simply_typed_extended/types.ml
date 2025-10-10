@@ -13,14 +13,7 @@ type ty =
 [@@deriving compare, equal, quickcheck]
 
 let sexp_of_ty ty =
-  let rec parse =
-    let sexp_of_fields fields =
-      fields
-      |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
-      |> List.intersperse ~sep:[ Atom "," ]
-      |> List.concat
-    in
-    function
+  let rec parse = function
     | TyBase c -> Atom (String.of_char c)
     | TyUnit -> Atom "unit"
     | TyBool -> Atom "bool"
@@ -30,8 +23,24 @@ let sexp_of_ty ty =
         ([ Atom "{" ]
          @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse tys)
          @ [ Atom "}" ])
-    | TyRecord record -> List ([ Atom "|" ] @ sexp_of_fields record @ [ Atom "|" ])
-    | TyVariant vs -> List ([ Atom "<" ] @ sexp_of_fields vs @ [ Atom ">" ])
+    | TyRecord record ->
+      let fields =
+        record
+        |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "|" ] @ fields @ [ Atom "|" ])
+    | TyVariant vs ->
+      let fields =
+        vs
+        |> List.map ~f:(function
+          | l, TyUnit -> [ Atom l ]
+          | l, ty -> [ Atom l; Atom ":"; parse ty ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "<" ] @ fields @ [ Atom ">" ])
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
   in
   parse ty
