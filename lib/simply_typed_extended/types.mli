@@ -35,6 +35,7 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | EFix of t
 [@@deriving sexp]
 
 type context = ty String.Map.t [@@deriving sexp]

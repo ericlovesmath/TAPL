@@ -128,6 +128,7 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | EFix of t
 [@@deriving equal, quickcheck]
 
 let sexp_of_t t =
@@ -167,6 +168,7 @@ let sexp_of_t t =
     | ESucc t -> List [ Atom "succ"; parse t ]
     | EPred t -> List [ Atom "pred"; parse t ]
     | EIsZero t -> List [ Atom "iszero"; parse t ]
+    | EFix t -> List [ Atom "fix"; parse t ]
   in
   parse t
 ;;
@@ -223,6 +225,9 @@ let t_of_sexp sexp =
     | List [ Atom "succ"; t ] -> ESucc (parse t)
     | List [ Atom "pred"; t ] -> EPred (parse t)
     | List [ Atom "iszero"; t ] -> EIsZero (parse t)
+    | List [ Atom "fix"; t ] -> EFix (parse t)
+    | List (Atom "letrec" :: Atom v :: Atom ":" :: ty :: Atom "=" :: b :: Atom "in" :: t)
+      -> ELet (v, EFix (EAbs (v, ty_of_sexp ty, parse b)), parse (List t))
     | List (h :: t) -> List.fold_left ~f:(fun f x -> EApp (f, parse x)) ~init:(parse h) t
     | List xs -> fail [%message "Unknown list" (xs : Sexp.t list)]
   in
