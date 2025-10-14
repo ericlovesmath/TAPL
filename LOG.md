@@ -34,3 +34,9 @@
     - Examples and test cases
 
 - Some debugging on LaTeX generation
+
+# TODO
+
+- REPL interface for type inference and evaluation
+- Ref / List / Exceptions, maybe?
+- Push Bonsai code
