@@ -1,97 +1,103 @@
 open Core
 
-let explode (s : string) : char list = Sequence.to_list (String.to_sequence s)
-let implode (st : char list) : string = String.of_sequence (Sequence.of_list st)
+type 'a t = char Sequence.t -> ('a * char Sequence.t) Or_error.t
 
-(* TODO: Parse Seq.t instead *)
-type 'a parser = char list -> ('a * char list) option
+let fail : 'a t = fun _ -> error_s [%message "fail"]
 
-(* TODO: Document these Haskell-like functions *)
-let pure (x : 'a) : 'a parser = fun st -> Some (x, st)
-let fail : 'a parser = fun _ -> None
+include Monad.Make (struct
+    type nonrec 'a t = 'a t
 
-let ( >>= ) (p : 'a parser) (f : 'a -> 'b parser) : 'b parser =
+    let bind p ~f =
+      fun st ->
+      let%bind.Or_error a, st' = p st in
+      f a st'
+    ;;
+
+    let return x st = Ok (x, st)
+    let map = `Define_using_bind
+  end)
+
+include Applicative.Make (struct
+    type nonrec 'a t = 'a t
+
+    let apply pf px st =
+      let open Or_error.Let_syntax in
+      let%bind f, st' = pf st in
+      let%bind x, st'' = px st' in
+      Ok (f x, st'')
+    ;;
+
+    let return = return
+    let map = `Define_using_apply
+  end)
+
+module Infix_syntax = struct
+  include Applicative_infix
+
+  let ( <$> ) f x = map ~f x
+  let ( <$ ) f p = Fun.const <$> return f <*> p
+  let ( $> ) p f = f <$ p
+
+  let ( <*>| ) pf px =
+    let open Or_error.Let_syntax in
+    fun st ->
+      let%bind f, st' = pf st in
+      let%bind x, st'' = (Lazy.force px) st' in
+      Ok (f x, st'')
+  ;;
+
+  let ( <|> ) p p' =
+    fun st ->
+    match p st with
+    | Error _ -> p' st
+    | Ok res -> Ok res
+  ;;
+end
+
+open Let_syntax
+open Infix_syntax
+
+let satisfy (pred : char -> bool) : char t =
   fun st ->
-  match p st with
-  | None -> None
-  | Some (a, st') -> f a st'
+  match Sequence.next st with
+  | Some (c, st') when pred c -> Ok (c, st')
+  | Some _ -> Or_error.error_string "satisfy fail invalid"
+  | None -> Or_error.error_string "satisfy fail EOF"
 ;;
-
-let ( let* ) = ( >>= )
-
-let ( <*> ) (pf : ('a -> 'b) parser) (px : 'a parser) : 'b parser =
-  let open Option.Let_syntax in
-  fun st ->
-    let%bind f, st' = pf st in
-    let%bind x, st'' = px st' in
-    Some (f x, st'')
-;;
-
-let ( <*>| ) (pf : ('a -> 'b) parser) (px : 'a parser lazy_t) : 'b parser =
-  let open Option.Let_syntax in
-  fun st ->
-    let%bind f, st' = pf st in
-    let%bind x, st'' = (Lazy.force px) st' in
-    Some (f x, st'')
-;;
-
-let ( <$> ) (f : 'a -> 'b) (p : 'a parser) : 'b parser =
-  fun st ->
-  match p st with
-  | None -> None
-  | Some (a, st') -> Some (f a, st')
-;;
-
-let ( <|> ) (p : 'a parser) (p' : 'a parser) : 'a parser =
-  fun st ->
-  match p st with
-  | None -> p' st
-  | Some res -> Some res
-;;
-
-let ( <$ ) f p = Fun.const <$> pure f <*> p
-let ( $> ) p f = f <$ p
-let ( *> ) p q = Fun.id <$ p <*> q
-let ( <* ) p q = Fun.const <$> p <*> q
-
-let rec seq = function
-  | [] -> pure []
-  | hd :: tl -> List.cons <$> hd <*> seq tl
-;;
-
-let choice l = List.fold_right ~f:( <|> ) ~init:(Fun.const None) l
 
 let rec many1 p = List.cons <$> p <*>| lazy (many p)
-and many p = many1 p <|> pure []
+and many p = many1 p <|> return []
 
+let choice = List.fold_right ~f:( <|> ) ~init:fail
 let sepBy1 sep p = List.cons <$> p <*> many (sep *> p)
-let sepBy sep p = sepBy1 sep p <|> pure []
-
-let satisfy (pred : char -> bool) : char parser =
-  fun st ->
-  match st with
-  | c :: st' when pred c -> Some (c, st')
-  | _ -> None
-;;
-
+let sepBy sep p = sepBy1 sep p <|> return []
 let charP c = satisfy (Char.equal c)
-let stringP st = seq (List.map ~f:charP (explode st))
-
-let alphaP =
-  let is_alpha c = Char.O.((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) in
-  many1 (satisfy is_alpha)
-;;
-
-let numericP =
-  let is_numeric c = Char.O.(c >= '0' && c <= '9') in
-  many1 (satisfy is_numeric)
-;;
-
+let stringP st = all (List.map ~f:charP (String.to_list st))
+let alphaP = many1 (satisfy Char.is_alpha)
+let numericP = many1 (satisfy Char.is_digit)
 let emptyP = charP ' ' <|> charP '\n' <|> charP '\t'
-let strip p = many emptyP *> p <* many emptyP
+let strip p = ignore_m (many emptyP) *> p <* ignore_m (many emptyP)
 let spacesP = many1 emptyP
 
 let%expect_test "check" =
-  print_endline "test";
+  let integerP =
+    let%bind num =
+      numericP
+      <|> (List.cons <$> charP '-' <*> numericP)
+      <|> (List.cons <$> charP '+' <*> numericP)
+    in
+    return (int_of_string (String.of_list num))
+  in
+  let dosP =
+    let%bind n = integerP in
+    let%bind _ = spacesP in
+    let%bind m = integerP in
+    return (n, m)
+  in
+  let x = dosP (String.to_sequence "12 -31") in
+  print_s [%message (x : ((int * int) * char Sequence.t) Or_error.t)];
+  [%expect {| test |}];
+  let x = stringP "abcde" (String.to_sequence "abcde") in
+  print_s [%message (x : (char list * char Sequence.t) Or_error.t)];
   [%expect {| test |}]
 ;;
