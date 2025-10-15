@@ -2,21 +2,6 @@ open Core
 
 type 'a t = char Sequence.t -> ('a * char Sequence.t) Or_error.t
 
-let fail : 'a t = fun _ -> error_s [%message "fail"]
-
-include Monad.Make (struct
-    type nonrec 'a t = 'a t
-
-    let bind p ~f =
-      fun st ->
-      let%bind.Or_error a, st' = p st in
-      f a st'
-    ;;
-
-    let return x st = Ok (x, st)
-    let map = `Define_using_bind
-  end)
-
 include Applicative.Make (struct
     type nonrec 'a t = 'a t
 
@@ -27,8 +12,21 @@ include Applicative.Make (struct
       Ok (f x, st'')
     ;;
 
-    let return = return
+    let return x st = Ok (x, st)
     let map = `Define_using_apply
+  end)
+
+include Monad.Make (struct
+    type nonrec 'a t = 'a t
+
+    let bind p ~f =
+      fun st ->
+      let%bind.Or_error a, st' = p st in
+      f a st'
+    ;;
+
+    let return = return
+    let map = `Define_using_bind
   end)
 
 module Infix_syntax = struct
@@ -56,6 +54,8 @@ end
 
 open Let_syntax
 open Infix_syntax
+
+let fail : 'a t = fun _ -> error_s [%message "fail"]
 
 let satisfy (pred : char -> bool) : char t =
   fun st ->
