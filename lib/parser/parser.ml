@@ -81,25 +81,26 @@ let char_p c = satisfy (Char.equal c)
 let string_p st = all (List.map ~f:char_p (String.to_list st))
 let alpha_p = many1 (satisfy Char.is_alpha)
 let numeric_p = many1 (satisfy Char.is_digit)
-let empty_p = char_p ' ' <|> char_p '\n' <|> char_p '\t'
+let empty_p = satisfy Char.is_whitespace
 let strip p = ignore_m (many empty_p) *> p <* ignore_m (many empty_p)
 let spaces_p = many1 empty_p
 
-let run p s =
+let stream_of_string s =
   let advance c pos =
     if Char.equal c '\n'
     then { line = pos.line + 1; col = 1 }
     else { line = pos.line; col = pos.col + 1 }
   in
-  let stream_of_string s =
-    Sequence.unfold_step
-      ~init:(`Chars (String.to_list s, { line = 1; col = 1 }))
-      ~f:(function
-        | `Done -> Done
-        | `Chars ([], _) -> Done
-        | `Chars (c :: cs, pos) ->
-          Yield { value = c, pos; state = `Chars (cs, advance c pos) })
-  in
+  Sequence.unfold_step
+    ~init:(`Chars (String.to_list s, { line = 1; col = 1 }))
+    ~f:(function
+      | `Done -> Done
+      | `Chars ([], _) -> Done
+      | `Chars (c :: cs, pos) ->
+        Yield { value = c, pos; state = `Chars (cs, advance c pos) })
+;;
+
+let run p s =
   let%bind.Or_error x, st = p (stream_of_string s) in
   match Sequence.next st with
   | Some ((_, pos), _) -> fail ~pos "run: stream not fully consumed"
