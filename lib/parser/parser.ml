@@ -42,6 +42,8 @@ module Infix_syntax = struct
   let ( <$> ) f x = map ~f x
   let ( <$ ) f p = Fun.const <$> return f <*> p
   let ( $> ) p f = f <$ p
+  let ( *> ) i p = ignore_m i *> p
+  let ( <* ) p i = p <* ignore_m i
 
   let ( <*>| ) pf px =
     let open Or_error.Let_syntax in
@@ -82,8 +84,19 @@ let string_p st = all (List.map ~f:char_p (String.to_list st))
 let alpha_p = many1 (satisfy Char.is_alpha)
 let numeric_p = many1 (satisfy Char.is_digit)
 let empty_p = satisfy Char.is_whitespace
-let strip p = ignore_m (many empty_p) *> p <* ignore_m (many empty_p)
+let strip p = many empty_p *> p <* many empty_p
 let spaces_p = many1 empty_p
+
+let between brace_type p =
+  let l, r =
+    match brace_type with
+    | `Paren -> '(', ')'
+    | `Bracket -> '[', ']'
+    | `Curly -> '{', '}'
+    | `Angle -> '<', '>'
+  in
+  char_p l *> strip p <* char_p r
+;;
 
 let stream_of_string s =
   let advance c pos =
