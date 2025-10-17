@@ -30,6 +30,7 @@ let reserved =
     ; ">"
     ; "match"
     ; "with"
+    ; "as"
     ]
 ;;
 
@@ -158,7 +159,7 @@ let%expect_test "ty parse tests" =
 
 let rec t_p =
   fun st ->
-  let t_p = t_proj_p <|> t_seq_p <|> t_atom_p in
+  let t_p = t_proj_p <|> t_seq_p <|> t_as_p <|> t_app_p <|> t_atom_p in
   strip (t_p <|> between `Paren t_p) st
 
 and t_atom_p =
@@ -172,7 +173,11 @@ and t_atom_p =
    <|> t_tuple_p
    <|> t_record_p
    <|> t_variant_p
-   <|> t_match_p)
+   <|> t_match_p
+   <|> t_zero_p
+   <|> t_succ_p
+   <|> t_pred_p
+   <|> t_iszero_p)
     st
 
 and t_unit_p = return EUnit <* string_p "#u"
@@ -201,7 +206,7 @@ and t_tuple_p =
 
 and t_proj_p =
   fun st ->
-  (let%bind t = t_atom_p <* char_p '.' in
+  (let%bind t = t_atom_p <|> between `Paren t_p <* char_p '.' in
    (let%map i = numeric_p in
     EProjTuple (t, Int.of_string (String.of_list i)))
    <|>
@@ -235,7 +240,7 @@ and t_variant_p =
 
 and t_seq_p =
   fun st ->
-  (let%bind t = t_atom_p in
+  (let%bind t = t_atom_p <|> between `Paren t_p in
    let%bind _ = strip (char_p ';') in
    let%bind t' = t_p in
    return (ESeq (t, t')))
@@ -262,15 +267,32 @@ and t_if_p =
    return (EIf (c, t, f)))
     st
 
+and t_app_p =
+  fun st ->
+  (let%bind ts = sep_by1 (many1 empty_p) (t_atom_p <|> between `Paren t_p) in
+   match ts with
+   | [] ->
+     (* TODO: Has to be better solution than this *)
+     (* TODO: Have many1 return a NonEmpty.t? *)
+     Fn.const (Or_error.error_string "app: many1 should never return an empty list")
+   | hd :: tl -> return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:hd tl))
+    st
+
+and t_as_p =
+  fun st ->
+  (let%bind t = strip (t_atom_p <|> between `Paren t_p) in
+   let%bind ty = string_p "as" *> empty_p *> strip ty_p in
+   return (EAs (t, ty)))
+    st
+
 and t_zero_p = return EZero <* string_p "Z"
+and t_succ_p = fun st -> (char_p 'S' *> empty_p *> strip t_p) st
+and t_pred_p = fun st -> (string_p "pred" *> empty_p *> strip t_p) st
+and t_iszero_p = fun st -> (string_p "iszero" *> empty_p *> strip t_p) st
 
 (* TODO: EAbs of string * ty * t *)
-(* TODO: EApp of t * t *)
-(* TODO: EAs of t * ty *)
-(* TODO: ESucc of t *)
-(* TODO: EPred of t *)
-(* TODO: EIsZero of t *)
 (* TODO: EFix of t *)
+(* TODO: Letrec *)
 
 let%expect_test "t parse tests" =
   let test s = s |> run t_p |> Or_error.sexp_of_t sexp_of_t |> print_s in
@@ -313,9 +335,22 @@ let%expect_test "t parse tests" =
     | some x -> #t
     | none -> #f
     |};
+  test "f x y z";
+  test "f (x y) z";
+  test "match f (x y) z with | some x -> #t | none -> #f";
+  test "x as bool";
+  test "match pos as < p : nat , end > with | p n -> n | end -> #u";
   [%expect
     {|
     (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
     (Ok (case x of (some x => #t) (none $_ => #f)))
-    |}]
+    (Ok (((f x) y) z))
+    (Ok ((f (x y)) z))
+    (Ok (case ((f (x y)) z) of (some x => #t) (none $_ => #f)))
+    (Ok (x as bool))
+    (Ok (case (pos as (| p : nat , end : unit |)) of (p n => n) (end $_ => #u)))
+    |}];
+  test "Z Z Z Z";
+  test "iszero (pred (S (S Z)))";
+  [%expect {| (Ok (((0 0) 0) 0)) |}]
 ;;
