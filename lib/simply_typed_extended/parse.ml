@@ -28,6 +28,8 @@ let reserved =
     ; ")"
     ; "<"
     ; ">"
+    ; "match"
+    ; "with"
     ]
 ;;
 
@@ -157,7 +159,7 @@ let%expect_test "ty parse tests" =
 let rec t_p =
   fun st ->
   let t_p = t_proj_p <|> t_seq_p <|> t_atom_p in
-  (t_p <|> between `Paren t_p) st
+  strip (t_p <|> between `Paren t_p) st
 
 and t_atom_p =
   fun st ->
@@ -169,7 +171,8 @@ and t_atom_p =
    <|> t_let_p
    <|> t_tuple_p
    <|> t_record_p
-   <|> t_variant_p)
+   <|> t_variant_p
+   <|> t_match_p)
     st
 
 and t_unit_p = return EUnit <* string_p "#u"
@@ -238,7 +241,18 @@ and t_seq_p =
    return (ESeq (t, t')))
     st
 
-(* TODO: EMatch of t * (string * string * t) list *)
+and t_match_p =
+  fun st ->
+  let case_p =
+    let%bind label = char_p '|' *> empty_p *> ident_p <* empty_p in
+    let%bind v = ident_p <|> return "$_" in
+    let%bind body = strip (string_p "->") *> t_p in
+    return (label, v, body)
+  in
+  (let%bind t = string_p "match" *> empty_p *> strip t_p in
+   let%bind cases = string_p "with" *> many (strip case_p) in
+   return (EMatch (t, cases)))
+    st
 
 and t_if_p =
   fun st ->
@@ -293,6 +307,15 @@ let%expect_test "t parse tests" =
     (Ok (< none : #u > as (| some : nat , none : unit |)))
     |}];
   test "let x = a; b; c in #t; #f";
+  test
+    {|
+    match x with
+    | some x -> #t
+    | none -> #f
+    |};
   [%expect
-    {| (Ok (let x = (seq a (seq b c)) in (seq #t #f))) |}];
+    {|
+    (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
+    (Ok (case x of (some x => #t) (none $_ => #f)))
+    |}]
 ;;
