@@ -5,6 +5,7 @@ open Parser.Infix_syntax
 open Types
 
 let sep_commas p = sep_by1 (strip (char_p ',')) p
+let fail msg = Fn.const (Or_error.error_string msg)
 
 let reserved =
   String.Set.of_list
@@ -16,11 +17,7 @@ let reserved =
 
 let ident_p =
   let%bind s = String.of_list <$> alpha_p in
-  if Set.mem reserved s
-  then
-    (* TODO: There has to be a better way to track position as well *)
-    Fn.const (Or_error.error_string "var: reserved keyword")
-  else return s
+  if Set.mem reserved s then fail "var: reserved keyword" else return s
 ;;
 
 let rec ty_p =
@@ -75,7 +72,7 @@ and ty_variant_p =
   in
   let record_p =
     let%map fields = between `Angle (sep_commas (field_p <|> unit_field_p)) in
-    TyRecord fields
+    TyVariant fields
   in
   record_p st
 
@@ -118,15 +115,13 @@ let%expect_test "ty parse tests" =
     (Ok ({ nat , nat }))
     (Ok ({ bool , (({ (unit -> (bool -> bool)) , nat }) -> ({ nat , nat })) }))
     (Ok (| x : nat , y : (| bool : bool |) |))
-    (Ok (| some : nat , none : unit |))
+    (Ok (< some : nat , none >))
     |}];
   test "";
   test "{}";
   test "{ a , b : bool }";
   test "<>";
   test "()";
-  (* TODO: Better error messages *)
-  (* TODO: How does angstrom handle the fun st -> st) type issue *)
   [%expect
     {|
     (Error "satisfy: EOF")
@@ -136,6 +131,9 @@ let%expect_test "ty parse tests" =
     (Error ((pos ((line 1) (col 2))) "satisfy: pred not satisfied"))
     |}]
 ;;
+
+(** "Next Lexeme" shorthand *)
+let ( >> ) p p' = many empty_p *> p *> empty_p *> strip p'
 
 let rec t_p =
   fun st ->
@@ -168,25 +166,23 @@ and t_true_p = return ETrue <* string_p "#t"
 and t_false_p = return EFalse <* string_p "#f"
 
 and t_var_p =
-  fun st ->
-  (let%map id = ident_p in
-   EVar id)
-    st
+  let%map id = ident_p in
+  EVar id
 
 and t_let_p =
   fun st ->
-  (let%bind id = string_p "let" *> empty_p *> strip ident_p in
-   let%bind bind = char_p '=' *> strip t_p in
-   let%bind body = string_p "in" *> empty_p *> strip t_p in
+  (let%bind id = string_p "let" >> ident_p in
+   let%bind bind = char_p '=' >> t_p in
+   let%bind body = string_p "in" >> t_p in
    return (ELet (id, bind, body)))
     st
 
 and t_letrec_p =
   fun st ->
-  (let%bind id = string_p "letrec" *> empty_p *> strip ident_p in
-   let%bind ty = char_p ':' *> strip ty_p in
-   let%bind bind = char_p '=' *> strip t_p in
-   let%bind body = string_p "in" *> empty_p *> strip t_p in
+  (let%bind id = string_p "letrec" >> ident_p in
+   let%bind ty = char_p ':' >> ty_p in
+   let%bind bind = char_p '=' >> t_p in
+   let%bind body = string_p "in" >> t_p in
    return (ELet (id, EFix (EAbs (id, ty, bind)), body)))
     st
 
@@ -210,8 +206,7 @@ and t_record_p =
   fun st ->
   let field_p =
     let%bind l = ident_p in
-    let%bind _ = strip (char_p '=') in
-    let%bind r = t_p in
+    let%bind r = char_p '=' >> t_p in
     return (l, r)
   in
   (let%map fields = between `Curly (sep_commas field_p) in
@@ -221,20 +216,19 @@ and t_record_p =
 and t_variant_p =
   fun st ->
   (let variant_p =
-     let%bind label = ident_p in
-     let%bind value = empty_p *> (t_p <|> return EUnit) in
+     let%bind label = ident_p <* empty_p in
+     let%bind value = t_p <|> return EUnit in
      return (label, value)
    in
-   let%bind label, value = between `Angle variant_p in
-   let%bind ty = empty_p *> string_p "as" *> empty_p *> ty_p in
+   let%bind label, value = between `Angle variant_p <* empty_p in
+   let%bind ty = string_p "as" >> ty_p in
    return (EVariant (label, ty, value)))
     st
 
 and t_seq_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   let%bind _ = strip (char_p ';') in
-   let%bind t' = t_p in
+   let%bind t' = char_p ';' >> t_p in
    return (ESeq (t, t')))
     st
 
@@ -263,10 +257,7 @@ and t_app_p =
   fun st ->
   (let%bind ts = sep_by1 (many1 empty_p) (t_atom_p <|> between `Paren t_p) in
    match ts with
-   | [] ->
-     (* TODO: Has to be better solution than this *)
-     (* TODO: Have many1 return a NonEmpty.t? *)
-     Fn.const (Or_error.error_string "app: many1 should never return an empty list")
+   | [] -> fail "app: many1 should never return an empty list"
    | hd :: tl -> return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:hd tl))
     st
 
@@ -278,30 +269,10 @@ and t_as_p =
     st
 
 and t_zero_p = return EZero <* string_p "Z"
-
-and t_succ_p =
-  fun st ->
-  (let%map t = char_p 'S' *> empty_p *> strip t_p in
-   ESucc t)
-    st
-
-and t_pred_p =
-  fun st ->
-  (let%map t = string_p "pred" *> empty_p *> strip t_p in
-   EPred t)
-    st
-
-and t_iszero_p =
-  fun st ->
-  (let%map t = string_p "iszero" *> empty_p *> strip t_p in
-   ESucc t)
-    st
-
-and t_fix_p =
-  fun st ->
-  (let%map t = string_p "fix" *> empty_p *> strip t_p in
-   EFix t)
-    st
+and t_succ_p = fun st -> (char_p 'S' >> t_p >>| fun t -> ESucc t) st
+and t_pred_p = fun st -> (string_p "pred" >> t_p >>| fun t -> EPred t) st
+and t_iszero_p = fun st -> (string_p "iszero" >> t_p >>| fun t -> EIsZero t) st
+and t_fix_p = fun st -> (string_p "fix" >> t_p >>| fun t -> EFix t) st
 
 and t_abs_p =
   fun st ->
@@ -318,8 +289,7 @@ let%expect_test "t parse tests" =
   test "if #f then #u else #f";
   test "if #f then #u";
   test "if if #u then #f else #t then (if #t then #f) else #f";
-  test "let x = v in #t";
-  test "let x=if #f then #f   in    #t";
+  test "let x = if #f then #f   in    #t";
   test "letrec x : bool = x in #t";
   [%expect
     {|
@@ -327,7 +297,6 @@ let%expect_test "t parse tests" =
     (Ok (if #f #u #f))
     (Ok (if #f #u #u))
     (Ok (if (if #u #f #t) (if #t #f #u) #f))
-    (Ok (let x = v in #t))
     (Ok (let x = (if #f #f #u) in #t))
     (Ok (let x = (fix (fun x : bool -> x)) in #t))
     |}];
@@ -345,10 +314,11 @@ let%expect_test "t parse tests" =
     (Ok (({ #t , #f , #t }) . 0))
     (Ok (({ #t , #f , #t }) . 22))
     (Ok ((| x : #t , y : (v . 0) |) . x))
-    (Ok (< some : x > as (| some : nat , none : unit |)))
-    (Ok (< none : #u > as (| some : nat , none : unit |)))
+    (Ok (< some : x > as (< some : nat , none >)))
+    (Ok (< none : #u > as (< some : nat , none >)))
     |}];
   test "let x = a; b; c in #t; #f";
+  test "let x = a ; b ; c in #t; #f";
   test
     {|
     match x with
@@ -363,12 +333,13 @@ let%expect_test "t parse tests" =
   [%expect
     {|
     (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
+    (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
     (Ok (case x of (some x => #t) (none $_ => #f)))
     (Ok (((f x) y) z))
     (Ok ((f (x y)) z))
     (Ok (case ((f (x y)) z) of (some x => #t) (none $_ => #f)))
     (Ok (x as bool))
-    (Ok (case (pos as (| p : nat , end : unit |)) of (p n => n) (end $_ => #u)))
+    (Ok (case (pos as (< p : nat , end >)) of (p n => n) (end $_ => #u)))
     |}];
   test "Z Z Z Z";
   test "iszero (pred (S (S Z)))";
@@ -377,7 +348,7 @@ let%expect_test "t parse tests" =
   [%expect
     {|
     (Ok (((0 0) 0) 0))
-    (Ok (succ (pred (succ (succ 0)))))
+    (Ok (iszero (pred (succ (succ 0)))))
     (Ok (fix (succ 0)))
     (Ok (fun x : bool -> x))
     |}]
