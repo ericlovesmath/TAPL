@@ -6,33 +6,13 @@ open Types
 
 let sep_commas p = sep_by1 (strip (char_p ',')) p
 
-(* TODO: Disable ocamlformat in region *)
 let reserved =
   String.Set.of_list
-    [ "#u"
-    ; "#t"
-    ; "#f"
-    ; "if"
-    ; "then"
-    ; "else"
-    ; "Z"
-    ; "let"
-    ; "in"
-    ; "="
-    ; "."
-    ; "{"
-    ; "}"
-    ; "["
-    ; "]"
-    ; "("
-    ; ")"
-    ; "<"
-    ; ">"
-    ; "match"
-    ; "with"
-    ; "as"
-    ]
-;;
+    [ "#u" ; "#t" ; "#f" ; "if" ; "then" ; "else" ; "Z"
+    ; "let" ; "letrec" ; "in" ; "=" ; "." ; "{" ; "}" ; "["
+    ; "]" ; "(" ; ")" ; "<" ; ">" ; "match" ; "with" ; "as"
+    ; "S"; "iszero"; "pred"; "fun" ; "->" ]
+ [@@ocamlformat "disable"]
 
 let ident_p =
   let%bind s = String.of_list <$> alpha_p in
@@ -146,7 +126,7 @@ let%expect_test "ty parse tests" =
   test "<>";
   test "()";
   (* TODO: Better error messages *)
-  (* TODO: How does angstrong handle the fun st -> st) type issue *)
+  (* TODO: How does angstrom handle the fun st -> st) type issue *)
   [%expect
     {|
     (Error "satisfy: EOF")
@@ -170,6 +150,7 @@ and t_atom_p =
    <|> t_if_p
    <|> t_var_p
    <|> t_let_p
+   <|> t_letrec_p
    <|> t_tuple_p
    <|> t_record_p
    <|> t_variant_p
@@ -177,7 +158,9 @@ and t_atom_p =
    <|> t_zero_p
    <|> t_succ_p
    <|> t_pred_p
-   <|> t_iszero_p)
+   <|> t_iszero_p
+   <|> t_fix_p
+   <|> t_abs_p)
     st
 
 and t_unit_p = return EUnit <* string_p "#u"
@@ -196,6 +179,15 @@ and t_let_p =
    let%bind bind = char_p '=' *> strip t_p in
    let%bind body = string_p "in" *> empty_p *> strip t_p in
    return (ELet (id, bind, body)))
+    st
+
+and t_letrec_p =
+  fun st ->
+  (let%bind id = string_p "letrec" *> empty_p *> strip ident_p in
+   let%bind ty = char_p ':' *> strip ty_p in
+   let%bind bind = char_p '=' *> strip t_p in
+   let%bind body = string_p "in" *> empty_p *> strip t_p in
+   return (ELet (id, EFix (EAbs (id, ty, bind)), body)))
     st
 
 and t_tuple_p =
@@ -286,13 +278,39 @@ and t_as_p =
     st
 
 and t_zero_p = return EZero <* string_p "Z"
-and t_succ_p = fun st -> (char_p 'S' *> empty_p *> strip t_p) st
-and t_pred_p = fun st -> (string_p "pred" *> empty_p *> strip t_p) st
-and t_iszero_p = fun st -> (string_p "iszero" *> empty_p *> strip t_p) st
 
-(* TODO: EAbs of string * ty * t *)
-(* TODO: EFix of t *)
-(* TODO: Letrec *)
+and t_succ_p =
+  fun st ->
+  (let%map t = char_p 'S' *> empty_p *> strip t_p in
+   ESucc t)
+    st
+
+and t_pred_p =
+  fun st ->
+  (let%map t = string_p "pred" *> empty_p *> strip t_p in
+   EPred t)
+    st
+
+and t_iszero_p =
+  fun st ->
+  (let%map t = string_p "iszero" *> empty_p *> strip t_p in
+   ESucc t)
+    st
+
+and t_fix_p =
+  fun st ->
+  (let%map t = string_p "fix" *> empty_p *> strip t_p in
+   EFix t)
+    st
+
+and t_abs_p =
+  fun st ->
+  (let%bind id = string_p "fun" *> empty_p *> strip ident_p in
+   let%bind ty = string_p ":" *> strip ty_p in
+   let%bind t = string_p "->" *> strip t_p in
+   return (EAbs (id, ty, t)))
+    st
+;;
 
 let%expect_test "t parse tests" =
   let test s = s |> run t_p |> Or_error.sexp_of_t sexp_of_t |> print_s in
@@ -302,6 +320,7 @@ let%expect_test "t parse tests" =
   test "if if #u then #f else #t then (if #t then #f) else #f";
   test "let x = v in #t";
   test "let x=if #f then #f   in    #t";
+  test "letrec x : bool = x in #t";
   [%expect
     {|
     (Ok #u)
@@ -310,6 +329,7 @@ let%expect_test "t parse tests" =
     (Ok (if (if #u #f #t) (if #t #f #u) #f))
     (Ok (let x = v in #t))
     (Ok (let x = (if #f #f #u) in #t))
+    (Ok (let x = (fix (fun x : bool -> x)) in #t))
     |}];
   test "{ {#t,if #t then b} , #f,#t}";
   test "v.0";
@@ -352,5 +372,13 @@ let%expect_test "t parse tests" =
     |}];
   test "Z Z Z Z";
   test "iszero (pred (S (S Z)))";
-  [%expect {| (Ok (((0 0) 0) 0)) |}]
+  test "fix (S Z)";
+  test "fun x : bool -> x";
+  [%expect
+    {|
+    (Ok (((0 0) 0) 0))
+    (Ok (succ (pred (succ (succ 0)))))
+    (Ok (fix (succ 0)))
+    (Ok (fun x : bool -> x))
+    |}]
 ;;
