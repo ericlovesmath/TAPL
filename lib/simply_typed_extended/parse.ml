@@ -12,7 +12,7 @@ let reserved =
     [ "#u" ; "#t" ; "#f" ; "if" ; "then" ; "else" ; "Z"
     ; "let" ; "letrec" ; "in" ; "=" ; "." ; "{" ; "}" ; "["
     ; "]" ; "(" ; ")" ; "<" ; ">" ; "match" ; "with" ; "as"
-    ; "S"; "iszero"; "pred"; "fun" ; "->" ]
+    ; "S"; "iszero"; "pred"; "fun" ; "->"; "fix" ]
  [@@ocamlformat "disable"]
 
 let ident_p =
@@ -216,11 +216,11 @@ and t_record_p =
 and t_variant_p =
   fun st ->
   (let variant_p =
-     let%bind label = ident_p <* empty_p in
-     let%bind value = t_p <|> return EUnit in
+     let%bind label = ident_p in
+     let%bind value = empty_p *> (t_p <|> return EUnit) in
      return (label, value)
    in
-   let%bind label, value = between `Angle variant_p <* empty_p in
+   let%bind label, value = between `Angle variant_p in
    let%bind ty = string_p "as" >> ty_p in
    return (EVariant (label, ty, value)))
     st
@@ -237,7 +237,7 @@ and t_match_p =
   let case_p =
     let%bind label = char_p '|' *> empty_p *> ident_p <* empty_p in
     let%bind v = ident_p <|> return "$_" in
-    let%bind body = strip (string_p "->") *> t_p in
+    let%bind body = strip (string_p "=>") *> t_p in
     return (label, v, body)
   in
   (let%bind t = string_p "match" *> empty_p *> strip t_p in
@@ -322,14 +322,14 @@ let%expect_test "t parse tests" =
   test
     {|
     match x with
-    | some x -> #t
-    | none -> #f
+    | some x => #t
+    | none => #f
     |};
   test "f x y z";
   test "f (x y) z";
-  test "match f (x y) z with | some x -> #t | none -> #f";
+  test "match f (x y) z with | some x => #t | none => #f";
   test "x as bool";
-  test "match pos as < p : nat , end > with | p n -> n | end -> #u";
+  test "match pos as < p : nat , end > with | p n => n | end => #u";
   [%expect
     {|
     (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
