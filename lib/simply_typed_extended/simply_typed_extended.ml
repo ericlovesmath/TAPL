@@ -431,17 +431,17 @@ let%expect_test "cool examples" =
     |}]
 ;;
 
-(* let%expect_test "addition (no closures)" = *)
-(*   let pair = "({ x : nat , y : nat })" in *)
-(*   test *)
-(*     [%string *)
-(*       {| *)
-(*       letrec add : (%{pair} -> nat) = *)
-(*         (fun xy : %{pair} -> *)
-(*           (if (iszero (xy.x)) *)
-(*             then (xy.y) *)
-(*             else (add ({ x = (pred (xy.x)) , y = (S (xy.y)) })))) *)
-(*       in add { x = S (S Z) , y = S (S Z) } *)
-(*       |}]; *)
-(*   [%expect {| ((ty nat) (result (succ (succ (succ (succ 0)))))) |}] *)
-(* ;; *)
+let%expect_test "addition (no closures)" =
+  let pair = "({ x : nat , y : nat })" in
+  test
+    [%string
+      {|
+      letrec add : (%{pair} -> nat) =
+        (fun xy : %{pair} ->
+          (if (iszero (xy.x))
+            then (xy.y)
+            else (add ({ x = (pred (xy.x)) , y = (S (xy.y)) }))))
+      in add { x = S (S Z), y = S (S Z) }
+      |}];
+  [%expect {| ((ty nat) (result (succ (succ (succ (succ 0)))))) |}]
+;;
