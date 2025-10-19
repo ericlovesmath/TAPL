@@ -39,7 +39,7 @@ struct
     include Applicative_infix
 
     let ( <$> ) f x = map ~f x
-    let ( <$ ) f p = Fun.const <$> return f <*> p
+    let ( <$ ) f p = Fun.const f <$> p
     let ( $> ) p f = f <$ p
     let ( *> ) i p = ignore_m i *> p
     let ( <* ) p i = p <* ignore_m i
@@ -73,6 +73,23 @@ struct
     | None -> Or_error.error_string "satisfy: EOF"
   ;;
 
+  let satisfy_map (pred : token -> 'a option) : 'a t =
+    fun st ->
+    match Sequence.next st with
+    | None -> Or_error.error_string "satisfy_map: EOF"
+    | Some ((c, pos), st') ->
+      (match pred c with
+       | Some c -> Ok (c, st')
+       | None -> fail ~pos "satisfy_map: pred not satisfied")
+  ;;
+
+  let peek : token t =
+    fun st ->
+    match Sequence.next st with
+    | None -> Or_error.error_string "peek: EOF"
+    | Some ((c, _), _) -> Ok (c, st)
+  ;;
+
   let rec many1 p = List.cons <$> p <*>| lazy (many p)
   and many p = many1 p <|> return []
 
@@ -87,7 +104,5 @@ struct
   ;;
 
   let tok t = satisfy (equal_token t)
-
-  (* TODO: Implement this like a MonadFail instance *)
   let fail msg = Fn.const (Or_error.error_string msg)
 end

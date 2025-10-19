@@ -6,10 +6,9 @@ open Let_syntax
 open Infix_syntax
 
 let ident_p : string t =
-  let%bind next = satisfy (Fn.const true) in
-  match next with
-  | ID s -> return s
-  | _ -> fail "not a ident"
+  satisfy_map (function
+    | ID s -> Some s
+    | _ -> None)
 ;;
 
 let between brace_type p =
@@ -30,25 +29,15 @@ let rec ty_p =
   (ty_p <|> between `Paren ty_p) st
 
 and ty_atom_p =
-  fun st ->
-  (ty_tuple_p
-   <|> ty_record_p
-   <|> ty_variant_p
-   <|> ty_base_p
-   <|> ty_unit_p
-   <|> ty_bool_p
-   <|> ty_nat_p)
-    st
+  fun st -> (ty_singles_p <|> ty_tuple_p <|> ty_record_p <|> ty_variant_p) st
 
-and ty_base_p =
-  let%bind next = satisfy (Fn.const true) in
-  match next with
-  | BASE c -> return (TyBase c)
-  | _ -> fail "not a tybase"
-
-and ty_unit_p = return TyUnit <* tok UNITTY
-and ty_bool_p = return TyBool <* tok BOOL
-and ty_nat_p = return TyNat <* tok NAT
+and ty_singles_p =
+  satisfy_map (function
+    | UNITTY -> Some TyUnit
+    | BOOL -> Some TyBool
+    | NAT -> Some TyNat
+    | BASE c -> Some (TyBase c)
+    | _ -> None)
 
 and ty_tuple_p =
   fun st ->
@@ -144,37 +133,38 @@ let%expect_test "ty parse tests" =
 
 let rec t_p =
   fun st ->
-  let t_p = t_proj_p <|> t_seq_p <|> t_as_p <|> t_app_p <|> t_atom_p in
-  (t_p <|> between `Paren t_p) st
+  (let%bind t = t_atom_p <|> between `Paren t_p in
+  (* NOTE: Postfix parsing *)
+   t_proj_p t <|> t_seq_p t <|> t_as_p t <|> t_app_p t <|> return t)
+    st
 
 and t_atom_p =
   fun st ->
-  (t_unit_p
-   <|> t_true_p
-   <|> t_false_p
-   <|> t_if_p
-   <|> t_var_p
-   <|> t_let_p
-   <|> t_letrec_p
-   <|> t_tuple_p
-   <|> t_record_p
-   <|> t_variant_p
-   <|> t_match_p
-   <|> t_zero_p
-   <|> t_succ_p
-   <|> t_pred_p
-   <|> t_iszero_p
-   <|> t_fix_p
-   <|> t_abs_p)
-    st
-
-and t_unit_p = return EUnit <* tok UNIT
-and t_true_p = return ETrue <* tok TRUE
-and t_false_p = return EFalse <* tok FALSE
-
-and t_var_p =
-  let%map id = ident_p in
-  EVar id
+  let t_singles_p =
+    satisfy_map (function
+      | UNIT -> Some EUnit
+      | TRUE -> Some ETrue
+      | FALSE -> Some EFalse
+      | ID v -> Some (EVar v)
+      | ZERO -> Some EZero
+      | _ -> None)
+  in
+  let t_commit_prefix_p =
+    match%bind peek with
+    | LET -> t_let_p
+    | LETREC -> t_letrec_p
+    | LCURLY -> t_tuple_p <|> t_record_p
+    | LANGLE -> t_variant_p
+    | MATCH -> t_match_p
+    | IF -> t_if_p
+    | SUCC -> t_succ_p
+    | PRED -> t_pred_p
+    | ISZERO -> t_iszero_p
+    | FIX -> t_fix_p
+    | FUN -> t_abs_p
+    | _ -> fail "commit: not a fixed prefix"
+  in
+  (t_singles_p <|> t_commit_prefix_p) st
 
 and t_let_p =
   fun st ->
@@ -199,20 +189,17 @@ and t_tuple_p =
    ETuple ts)
     st
 
-and t_proj_p =
-  fun st ->
-  (let%bind t = t_atom_p <|> between `Paren t_p <* tok DOT in
-   (let%map i =
-      let%bind next = satisfy (Fn.const true) in
-      match next with
-      | INT i -> return i
-      | _ -> fail "not an int"
-    in
-    EProjTuple (t, i))
-   <|>
-   let%map l = ident_p in
-   EProjRecord (t, l))
-    st
+and t_proj_p t =
+  let%bind _ = tok DOT in
+  (let%map i =
+     satisfy_map (function
+       | INT i -> Some i
+       | _ -> None)
+   in
+   EProjTuple (t, i))
+  <|>
+  let%map l = ident_p in
+  EProjRecord (t, l)
 
 and t_record_p =
   fun st ->
@@ -237,12 +224,9 @@ and t_variant_p =
    return (EVariant (label, ty, value)))
     st
 
-and t_seq_p =
-  fun st ->
-  (let%bind t = t_atom_p <|> between `Paren t_p in
-   let%bind t' = tok SEMI *> t_p in
-   return (ESeq (t, t')))
-    st
+and t_seq_p t =
+  let%map t' = tok SEMI *> t_p in
+  ESeq (t, t')
 
 and t_match_p =
   fun st ->
@@ -265,22 +249,14 @@ and t_if_p =
    return (EIf (c, t, f)))
     st
 
-and t_app_p =
-  fun st ->
-  (let%bind ts = many1 (t_atom_p <|> between `Paren t_p) in
-   match ts with
-   | [] -> fail "app: many1 should never return an empty list"
-   | hd :: tl -> return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:hd tl))
-    st
+and t_app_p t =
+  let%bind ts = many (t_atom_p <|> between `Paren t_p) in
+  return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:t ts)
 
-and t_as_p =
-  fun st ->
-  (let%bind t = t_atom_p <|> between `Paren t_p in
-   let%bind ty = tok AS *> ty_p in
-   return (EAs (t, ty)))
-    st
+and t_as_p t =
+  let%map ty = tok AS *> ty_p in
+  EAs (t, ty)
 
-and t_zero_p = return EZero <* tok ZERO
 and t_succ_p = fun st -> (tok SUCC *> t_p >>| fun t -> ESucc t) st
 and t_pred_p = fun st -> (tok PRED *> t_p >>| fun t -> EPred t) st
 and t_iszero_p = fun st -> (tok ISZERO *> t_p >>| fun t -> EIsZero t) st

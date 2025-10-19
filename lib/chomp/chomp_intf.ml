@@ -22,8 +22,6 @@ module type Parser = sig
     include Applicative.Applicative_infix with type 'a t := 'a t
 
     val ( <$> ) : ('a -> 'b) -> 'a t -> 'b t
-
-    (* TODO: I don't think the Functor infix is correct *)
     val ( <$ ) : 'a -> 'b t -> 'a t
     val ( $> ) : 'a t -> 'a -> 'a t
 
@@ -36,6 +34,8 @@ module type Parser = sig
   end
 
   val satisfy : (token -> bool) -> token t
+  val satisfy_map : (token -> 'a option) -> 'a t
+  val peek : token t
   val many1 : 'a t -> 'a list t
   val many : 'a t -> 'a list t
   val sep_by1 : 'a t -> 'b t -> 'b list t

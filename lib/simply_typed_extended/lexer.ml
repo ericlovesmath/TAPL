@@ -80,7 +80,6 @@ let rec strip t =
 ;;
 
 let read_while f t =
-  (* TODO: While loop *)
   let rec go () =
     if eof t
     then []
