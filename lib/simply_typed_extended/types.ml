@@ -1,6 +1,8 @@
 open Core
 open Sexplib.Sexp
 
+(* TODO: Do I really need a [of_sexp] now? *)
+
 type ty =
   | TyBase of (char[@generator Char.gen_uppercase])
   | TyUnit

@@ -1,5 +1,5 @@
 (library
- (name parser)
+ (name chomp)
  (libraries core)
  (preprocess
   (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_quick_test ppx_compare ppx_string))

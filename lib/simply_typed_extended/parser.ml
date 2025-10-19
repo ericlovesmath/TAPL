@@ -1,24 +1,28 @@
 open Core
-open Parser
-open Parser.Let_syntax
-open Parser.Infix_syntax
 open Types
+open Lexer
+include Chomp.Make (Lexer)
+open Let_syntax
+open Infix_syntax
 
-let sep_commas p = sep_by1 (strip (char_p ',')) p
-let fail msg = Fn.const (Or_error.error_string msg)
-
-let reserved =
-  String.Set.of_list
-    [ "#u" ; "#t" ; "#f" ; "if" ; "then" ; "else" ; "Z"
-    ; "let" ; "letrec" ; "in" ; "=" ; "." ; "{" ; "}" ; "["
-    ; "]" ; "(" ; ")" ; "<" ; ">" ; "match" ; "with" ; "as"
-    ; "S"; "iszero"; "pred"; "fun" ; "->"; "fix" ]
- [@@ocamlformat "disable"]
-
-let ident_p =
-  let%bind s = String.of_list <$> alpha_p in
-  if Set.mem reserved s then fail "var: reserved keyword" else return s
+let ident_p : string t =
+  let%bind next = satisfy (Fn.const true) in
+  match next with
+  | ID s -> return s
+  | _ -> fail "not a ident"
 ;;
+
+let between brace_type p =
+  let l, r =
+    match brace_type with
+    | `Paren -> LPAREN, RPAREN
+    | `Curly -> LCURLY, RCURLY
+    | `Angle -> LANGLE, RANGLE
+  in
+  tok l *> p <* tok r
+;;
+
+let commas p = sep_by1 (tok COMMA) p
 
 let rec ty_p =
   fun st ->
@@ -37,30 +41,32 @@ and ty_atom_p =
     st
 
 and ty_base_p =
-  let%map c = satisfy Char.is_uppercase in
-  TyBase c
+  let%bind next = satisfy (Fn.const true) in
+  match next with
+  | BASE c -> return (TyBase c)
+  | _ -> fail "not a tybase"
 
-and ty_unit_p = return TyUnit <* string_p "unit"
-and ty_bool_p = return TyBool <* string_p "bool"
-and ty_nat_p = return TyNat <* string_p "nat"
+and ty_unit_p = return TyUnit <* tok UNITTY
+and ty_bool_p = return TyBool <* tok BOOL
+and ty_nat_p = return TyNat <* tok NAT
 
 and ty_tuple_p =
   fun st ->
-  (let%map tys = between `Curly (sep_commas ty_p) in
+  (let%map tys = between `Curly (commas ty_p) in
    TyTuple tys)
     st
 
 and field_p =
   fun st ->
   (let%bind l = ident_p in
-   let%bind _ = strip (char_p ':') in
+   let%bind _ = tok COLON in
    let%bind r = ty_p in
    return (l, r))
     st
 
 and ty_record_p =
   fun st ->
-  (let%map fields = between `Curly (sep_commas field_p) in
+  (let%map fields = between `Curly (commas field_p) in
    TyRecord fields)
     st
 
@@ -71,7 +77,7 @@ and ty_variant_p =
     l, TyUnit
   in
   let record_p =
-    let%map fields = between `Angle (sep_commas (field_p <|> unit_field_p)) in
+    let%map fields = field_p <|> unit_field_p |> commas |> between `Angle in
     TyVariant fields
   in
   record_p st
@@ -79,7 +85,7 @@ and ty_variant_p =
 and ty_arrow_p =
   fun st ->
   (let%bind l = ty_atom_p <|> between `Paren ty_p in
-   let%bind _ = strip (string_p "->") in
+   let%bind _ = tok ARROW in
    let%bind r = ty_p in
    return (TyArrow (l, r)))
     st
@@ -87,8 +93,12 @@ and ty_arrow_p =
 
 let%expect_test "ty parse tests" =
   let test s =
-    let ty = run ty_p s in
-    print_s (Or_error.sexp_of_t sexp_of_ty ty)
+    s
+    |> Lexer.of_string
+    |> Lexer.lex
+    |> run ty_p
+    |> Or_error.sexp_of_t sexp_of_ty
+    |> print_s
   in
   test "A";
   test "bool";
@@ -99,14 +109,14 @@ let%expect_test "ty parse tests" =
   test "A -> (X -> nat) -> bool";
   test "(A -> X) -> (nat -> bool)";
   test "{  nat  , nat  }";
-  test "{bool,{unit->bool->bool,nat}->{nat,nat}}";
-  test "{ x : nat , y :{ bool:bool}}";
+  test "{bool,{unit->bool->bool,nat} -> {nat,nat}}";
+  test "{ x : nat , y : { b :bool} }";
   test "< some : nat, none >";
   [%expect
     {|
     (Ok A)
     (Ok bool)
-    (Error ((pos ((line 1) (col 2))) "satisfy: pred not satisfied"))
+    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
     (Ok (nat -> unit))
     (Ok (A -> (X -> (nat -> bool))))
     (Ok ((A -> X) -> (nat -> bool)))
@@ -114,7 +124,7 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok ({ nat , nat }))
     (Ok ({ bool , (({ (unit -> (bool -> bool)) , nat }) -> ({ nat , nat })) }))
-    (Ok (| x : nat , y : (| bool : bool |) |))
+    (Ok (| x : nat , y : (| b : bool |) |))
     (Ok (< some : nat , none >))
     |}];
   test "";
@@ -125,20 +135,17 @@ let%expect_test "ty parse tests" =
   [%expect
     {|
     (Error "satisfy: EOF")
-    (Error ((pos ((line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((line 1) (col 2))) "satisfy: pred not satisfied"))
+    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
+    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
+    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
+    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
     |}]
 ;;
-
-(** "Next Lexeme" shorthand *)
-let ( >> ) p p' = many empty_p *> p *> empty_p *> strip p'
 
 let rec t_p =
   fun st ->
   let t_p = t_proj_p <|> t_seq_p <|> t_as_p <|> t_app_p <|> t_atom_p in
-  strip (t_p <|> between `Paren t_p) st
+  (t_p <|> between `Paren t_p) st
 
 and t_atom_p =
   fun st ->
@@ -161,9 +168,9 @@ and t_atom_p =
    <|> t_abs_p)
     st
 
-and t_unit_p = return EUnit <* string_p "#u"
-and t_true_p = return ETrue <* string_p "#t"
-and t_false_p = return EFalse <* string_p "#f"
+and t_unit_p = return EUnit <* tok UNIT
+and t_true_p = return ETrue <* tok TRUE
+and t_false_p = return EFalse <* tok FALSE
 
 and t_var_p =
   let%map id = ident_p in
@@ -171,32 +178,37 @@ and t_var_p =
 
 and t_let_p =
   fun st ->
-  (let%bind id = string_p "let" >> ident_p in
-   let%bind bind = char_p '=' >> t_p in
-   let%bind body = string_p "in" >> t_p in
+  (let%bind id = tok LET *> ident_p in
+   let%bind bind = tok EQ *> t_p in
+   let%bind body = tok IN *> t_p in
    return (ELet (id, bind, body)))
     st
 
 and t_letrec_p =
   fun st ->
-  (let%bind id = string_p "letrec" >> ident_p in
-   let%bind ty = char_p ':' >> ty_p in
-   let%bind bind = char_p '=' >> t_p in
-   let%bind body = string_p "in" >> t_p in
+  (let%bind id = tok LETREC *> ident_p in
+   let%bind ty = tok COLON *> ty_p in
+   let%bind bind = tok EQ *> t_p in
+   let%bind body = tok IN *> t_p in
    return (ELet (id, EFix (EAbs (id, ty, bind)), body)))
     st
 
 and t_tuple_p =
   fun st ->
-  (let%map ts = between `Curly (sep_commas t_p) in
+  (let%map ts = between `Curly (commas t_p) in
    ETuple ts)
     st
 
 and t_proj_p =
   fun st ->
-  (let%bind t = t_atom_p <|> between `Paren t_p <* char_p '.' in
-   (let%map i = numeric_p in
-    EProjTuple (t, Int.of_string (String.of_list i)))
+  (let%bind t = t_atom_p <|> between `Paren t_p <* tok DOT in
+   (let%map i =
+      let%bind next = satisfy (Fn.const true) in
+      match next with
+      | INT i -> return i
+      | _ -> fail "not an int"
+    in
+    EProjTuple (t, i))
    <|>
    let%map l = ident_p in
    EProjRecord (t, l))
@@ -206,10 +218,10 @@ and t_record_p =
   fun st ->
   let field_p =
     let%bind l = ident_p in
-    let%bind r = char_p '=' >> t_p in
+    let%bind r = tok EQ *> t_p in
     return (l, r)
   in
-  (let%map fields = between `Curly (sep_commas field_p) in
+  (let%map fields = between `Curly (commas field_p) in
    ERecord fields)
     st
 
@@ -217,45 +229,45 @@ and t_variant_p =
   fun st ->
   (let variant_p =
      let%bind label = ident_p in
-     let%bind value = empty_p *> (t_p <|> return EUnit) in
+     let%bind value = t_p <|> return EUnit in
      return (label, value)
    in
    let%bind label, value = between `Angle variant_p in
-   let%bind ty = string_p "as" >> ty_p in
+   let%bind ty = tok AS *> ty_p in
    return (EVariant (label, ty, value)))
     st
 
 and t_seq_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   let%bind t' = char_p ';' >> t_p in
+   let%bind t' = tok SEMI *> t_p in
    return (ESeq (t, t')))
     st
 
 and t_match_p =
   fun st ->
   let case_p =
-    let%bind label = char_p '|' *> empty_p *> ident_p <* empty_p in
+    let%bind label = tok BAR *> ident_p in
     let%bind v = ident_p <|> return "$_" in
-    let%bind body = strip (string_p "=>") *> t_p in
+    let%bind body = tok ARROW *> t_p in
     return (label, v, body)
   in
-  (let%bind t = string_p "match" *> empty_p *> strip t_p in
-   let%bind cases = string_p "with" *> many (strip case_p) in
+  (let%bind t = tok MATCH *> t_p in
+   let%bind cases = tok WITH *> many case_p in
    return (EMatch (t, cases)))
     st
 
 and t_if_p =
   fun st ->
-  (let%bind c = string_p "if" *> empty_p *> strip t_p in
-   let%bind t = string_p "then" *> empty_p *> strip t_p in
-   let%bind f = string_p "else" *> empty_p *> strip t_p <|> return EUnit in
+  (let%bind c = tok IF *> t_p in
+   let%bind t = tok THEN *> t_p in
+   let%bind f = tok ELSE *> t_p <|> return EUnit in
    return (EIf (c, t, f)))
     st
 
 and t_app_p =
   fun st ->
-  (let%bind ts = sep_by1 (many1 empty_p) (t_atom_p <|> between `Paren t_p) in
+  (let%bind ts = many1 (t_atom_p <|> between `Paren t_p) in
    match ts with
    | [] -> fail "app: many1 should never return an empty list"
    | hd :: tl -> return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:hd tl))
@@ -263,28 +275,35 @@ and t_app_p =
 
 and t_as_p =
   fun st ->
-  (let%bind t = strip (t_atom_p <|> between `Paren t_p) in
-   let%bind ty = string_p "as" *> empty_p *> strip ty_p in
+  (let%bind t = t_atom_p <|> between `Paren t_p in
+   let%bind ty = tok AS *> ty_p in
    return (EAs (t, ty)))
     st
 
-and t_zero_p = return EZero <* string_p "Z"
-and t_succ_p = fun st -> (char_p 'S' >> t_p >>| fun t -> ESucc t) st
-and t_pred_p = fun st -> (string_p "pred" >> t_p >>| fun t -> EPred t) st
-and t_iszero_p = fun st -> (string_p "iszero" >> t_p >>| fun t -> EIsZero t) st
-and t_fix_p = fun st -> (string_p "fix" >> t_p >>| fun t -> EFix t) st
+and t_zero_p = return EZero <* tok ZERO
+and t_succ_p = fun st -> (tok SUCC *> t_p >>| fun t -> ESucc t) st
+and t_pred_p = fun st -> (tok PRED *> t_p >>| fun t -> EPred t) st
+and t_iszero_p = fun st -> (tok ISZERO *> t_p >>| fun t -> EIsZero t) st
+and t_fix_p = fun st -> (tok FIX *> t_p >>| fun t -> EFix t) st
 
 and t_abs_p =
   fun st ->
-  (let%bind id = string_p "fun" *> empty_p *> strip ident_p in
-   let%bind ty = string_p ":" *> strip ty_p in
-   let%bind t = string_p "->" *> strip t_p in
+  (let%bind id = tok FUN *> ident_p in
+   let%bind ty = tok COLON *> ty_p in
+   let%bind t = tok ARROW *> t_p in
    return (EAbs (id, ty, t)))
     st
 ;;
 
 let%expect_test "t parse tests" =
-  let test s = s |> run t_p |> Or_error.sexp_of_t sexp_of_t |> print_s in
+  let test s =
+    s
+    |> Lexer.of_string
+    |> Lexer.lex
+    |> run t_p
+    |> Or_error.sexp_of_t sexp_of_t
+    |> print_s
+  in
   test "#u";
   test "if #f then #u else #f";
   test "if #f then #u";
@@ -322,14 +341,14 @@ let%expect_test "t parse tests" =
   test
     {|
     match x with
-    | some x => #t
-    | none => #f
+    | some x -> #t
+    | none -> #f
     |};
   test "f x y z";
   test "f (x y) z";
-  test "match f (x y) z with | some x => #t | none => #f";
+  test "match f (x y) z with | some x -> #t | none -> #f";
   test "x as bool";
-  test "match pos as < p : nat , end > with | p n => n | end => #u";
+  test "match pos as < p : nat , end > with | p n -> n | end -> #u";
   [%expect
     {|
     (Ok (let x = (seq a (seq b c)) in (seq #t #f)))

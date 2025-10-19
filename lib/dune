@@ -1,7 +1,7 @@
 (library
  (name TAPL)
  (libraries
-   parser
+   chomp
    untyped_lambda_calculus
    untyped_nameless
    simply_typed_lambda_calculus
