@@ -35,6 +35,29 @@
 
 - Some debugging on LaTeX generation
 
+# Week 3
+
+- Parser Combinator Library, porting from Abstract Machine project
+
+    - Convert to use `Core`'s `Monad.Make` and `Applicative.Make`
+    - Add `Alternative` and `Functor` syntax
+    - Use `stream` of `(char * pos) Sequence.t` instead of `char list`
+
+- Implement parser combinator for `ty` and `t` (lots of retries)
+
+    - Big test function takes ~60 seconds to parse (guessing issue is with too many `strip`s)
+    - Refactor to remove some backtracking (~30 seconds)
+    - Implementation of Lexer to tokens
+
+        - Convert `Parser` to be a functor `Chomp.Make(Lexer)`
+        - Parses arbitrary tokens instead of `string`
+        - Cuts down big test function to ~20 seconds
+
+    - Refactor parser to use `commit` on first token (~12 seconds)
+    - Refactor parser to postfix forms that have valid expressions as a prefix (~1 second)
+
+- Simple REPL interface
+
 # TODO
 
 - REPL interface for type inference and evaluation
