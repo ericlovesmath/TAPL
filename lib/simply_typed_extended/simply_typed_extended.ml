@@ -330,17 +330,17 @@ let%expect_test "extended typechecker tests" =
   repl [%string "(%{record}.two).nest"];
   [%expect
     {|
-    ((ty (| one : bool , two : (| nest : (bool -> bool) |) |))
-     (result (| one : #t , two : (| nest : (fun x : bool -> x) |) |)))
+    ((ty ({ one : bool , two : ({ nest : (bool -> bool) }) }))
+     (result ({ one : #t , two : ({ nest : (fun x : bool -> x) }) })))
     ((ty bool) (result #t))
-    ((ty (| nest : (bool -> bool) |)) (result (| nest : (fun x : bool -> x) |)))
+    ((ty ({ nest : (bool -> bool) })) (result ({ nest : (fun x : bool -> x) })))
     ((ty (bool -> bool)) (result (fun x : bool -> x)))
-     |}];
+    |}];
   repl [%string "%{record}.three"];
   [%expect
     {|
     (ty_error
-     ("record missing field" (tys ((one bool) (two (| nest : (bool -> bool) |))))
+     ("record missing field" (tys ((one bool) (two ({ nest : (bool -> bool) }))))
       (l three)))
     |}];
   let option = "< some : bool , none >" in
@@ -387,13 +387,13 @@ let%expect_test "extended typechecker tests" =
   repl "S #t";
   [%expect
     {|
-    ((ty nat) (result 0))
-    ((ty nat) (result (succ 0)))
-    ((ty nat) (result (succ 0)))
+    ((ty nat) (result Z))
+    ((ty nat) (result (S Z)))
+    ((ty nat) (result (S Z)))
     ((ty bool) (result #t))
     ((ty bool) (result #t))
     (ty_error ("expected succ to take nat" (ty_t bool)))
-     |}];
+    |}];
   repl "fix (fun x : bool -> x)";
   [%expect {| ((ty bool) (result (fix (fun x : bool -> x)))) |}];
   repl
@@ -405,7 +405,7 @@ let%expect_test "extended typechecker tests" =
            else f (pred x)
      in f (S (S Z))
      |};
-  [%expect {| ((ty nat) (result 0)) |}]
+  [%expect {| ((ty nat) (result Z)) |}]
 ;;
 
 let%expect_test "cool examples" =
@@ -443,5 +443,5 @@ let%expect_test "addition (no closures)" =
             else (add ({ x = (pred (xy.x)) , y = (S (xy.y)) }))))
       in add { x = S (S Z), y = S (S Z) }
       |}];
-  [%expect {| ((ty nat) (result (succ (succ (succ (succ 0)))))) |}]
+  [%expect {| ((ty nat) (result (S (S (S (S Z)))))) |}]
 ;;

@@ -56,7 +56,7 @@
     - Refactor parser to use `commit` on first token (~12 seconds)
     - Refactor parser to postfix forms that have valid expressions as a prefix (~1 second)
 
-- Simple REPL interface
+- Simple REPL interface (not a true repl, just expression evaluator)
 
 # TODO
 

@@ -113,7 +113,7 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok ({ nat , nat }))
     (Ok ({ bool , (({ (unit -> (bool -> bool)) , nat }) -> ({ nat , nat })) }))
-    (Ok (| x : nat , y : (| b : bool |) |))
+    (Ok ({ x : nat , y : ({ b : bool }) }))
     (Ok (< some : nat , none >))
     |}];
   test "";
@@ -134,7 +134,7 @@ let%expect_test "ty parse tests" =
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-  (* NOTE: Postfix parsing *)
+   (* NOTE: Postfix parsing *)
    t_proj_p t <|> t_seq_p t <|> t_as_p t <|> t_app_p t <|> return t)
     st
 
@@ -289,10 +289,10 @@ let%expect_test "t parse tests" =
   [%expect
     {|
     (Ok #u)
-    (Ok (if #f #u #f))
-    (Ok (if #f #u #u))
-    (Ok (if (if #u #f #t) (if #t #f #u) #f))
-    (Ok (let x = (if #f #f #u) in #t))
+    (Ok (if #f then #u else #f))
+    (Ok (if #f then #u))
+    (Ok (if (if #u then #f else #t) then (if #t then #f) else #f))
+    (Ok (let x = (if #f then #f) in #t))
     (Ok (let x = (fix (fun x : bool -> x)) in #t))
     |}];
   test "{ {#t,if #t then b} , #f,#t}";
@@ -304,11 +304,11 @@ let%expect_test "t parse tests" =
   test "< none > as < some : nat, none >";
   [%expect
     {|
-    (Ok ({ ({ #t , (if #t b #u) }) , #f , #t }))
+    (Ok ({ ({ #t , (if #t then b) }) , #f , #t }))
     (Ok (v . 0))
     (Ok (({ #t , #f , #t }) . 0))
     (Ok (({ #t , #f , #t }) . 22))
-    (Ok ((| x : #t , y : (v . 0) |) . x))
+    (Ok (({ x : #t , y : (v . 0) }) . x))
     (Ok (< some : x > as (< some : nat , none >)))
     (Ok (< none : #u > as (< some : nat , none >)))
     |}];
@@ -327,14 +327,14 @@ let%expect_test "t parse tests" =
   test "match pos as < p : nat , end > with | p n -> n | end -> #u";
   [%expect
     {|
-    (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
-    (Ok (let x = (seq a (seq b c)) in (seq #t #f)))
-    (Ok (case x of (some x => #t) (none $_ => #f)))
+    (Ok (let x = (a ";" (b ";" c)) in (#t ";" #f)))
+    (Ok (let x = (a ";" (b ";" c)) in (#t ";" #f)))
+    (Ok (match x with (some x -> #t) (none $_ -> #f)))
     (Ok (((f x) y) z))
     (Ok ((f (x y)) z))
-    (Ok (case ((f (x y)) z) of (some x => #t) (none $_ => #f)))
+    (Ok (match ((f (x y)) z) with (some x -> #t) (none $_ -> #f)))
     (Ok (x as bool))
-    (Ok (case (pos as (< p : nat , end >)) of (p n => n) (end $_ => #u)))
+    (Ok (match (pos as (< p : nat , end >)) with (p n -> n) (end $_ -> #u)))
     |}];
   test "Z Z Z Z";
   test "iszero (pred (S (S Z)))";
@@ -342,9 +342,9 @@ let%expect_test "t parse tests" =
   test "fun x : bool -> x";
   [%expect
     {|
-    (Ok (((0 0) 0) 0))
-    (Ok (iszero (pred (succ (succ 0)))))
-    (Ok (fix (succ 0)))
+    (Ok (((Z Z) Z) Z))
+    (Ok (iszero (pred (S (S Z)))))
+    (Ok (fix (S Z)))
     (Ok (fun x : bool -> x))
     |}]
 ;;

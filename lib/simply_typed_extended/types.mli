@@ -9,9 +9,7 @@ type ty =
   | TyRecord of (string * ty) list
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
-[@@deriving sexp, equal]
-
-module Ty : Comparable.S with type t := ty
+[@@deriving sexp_of, equal]
 
 (* Church-style simply typed lambda calculus *)
 type t =
@@ -36,6 +34,6 @@ type t =
   | EPred of t
   | EIsZero of t
   | EFix of t
-[@@deriving sexp]
+[@@deriving sexp_of]
 
-type context = ty String.Map.t [@@deriving sexp]
+type context = ty String.Map.t [@@deriving sexp_of]
