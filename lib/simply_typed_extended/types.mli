@@ -36,4 +36,27 @@ type t =
   | EFix of t
 [@@deriving sexp_of]
 
+type nameless =
+  | UUnit
+  | UTrue
+  | UFalse
+  | UTuple of nameless list
+  | UProjTuple of nameless * int
+  | URecord of (string * nameless) list
+  | UProjRecord of nameless * string
+  | UVariant of string * nameless
+  | UMatch of nameless * (string * nameless) list
+  | USeq of nameless * nameless
+  | UIf of nameless * nameless * nameless
+  | ULet of string * nameless * nameless
+  | UVar of int
+  | UAbs of nameless
+  | UApp of nameless * nameless
+  | UZero
+  | USucc of nameless
+  | UPred of nameless
+  | UIsZero of nameless
+  | UFix of nameless
+[@@deriving sexp_of]
+
 type context = ty String.Map.t [@@deriving sexp_of]

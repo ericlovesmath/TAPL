@@ -237,7 +237,7 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect {| ((ty bool) (result #t)) |}];
   repl "if #t then #f else #f";
   [%expect {| ((ty bool) (result #f)) |}];
-  repl "if (fun x : bool -> x) then #t ekse #f";
+  repl "if (fun x : bool -> x) then #t else #f";
   [%expect {| (ty_error ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
   repl "if #t then #t else (fun x : bool -> x)";
   [%expect
