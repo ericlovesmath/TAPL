@@ -48,7 +48,6 @@ type nameless =
   | UMatch of nameless * (string * nameless) list
   | USeq of nameless * nameless
   | UIf of nameless * nameless * nameless
-  | ULet of string * nameless * nameless
   | UVar of int
   | UAbs of nameless
   | UApp of nameless * nameless

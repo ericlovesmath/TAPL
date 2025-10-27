@@ -25,7 +25,7 @@ let remove_names (t : t) : nameless =
       UMatch (aux ctx t, List.map cases ~f:(fun (l, v, tcase) -> l, aux (v :: ctx) tcase))
     | ESeq (t, t') -> USeq (aux ctx t, aux ctx t')
     | EIf (c, t, f) -> UIf (aux ctx c, aux ctx t, aux ctx f)
-    | ELet (v, b, t) -> ULet (v, aux ctx b, aux (v :: ctx) t)
+    | ELet (v, b, t) -> UApp (UAbs (aux (v :: ctx) t), aux ctx b)
     | EAbs (v, _, t) -> UAbs (aux (v :: ctx) t)
     | EVar v -> UVar (find ctx v)
     | EApp (f, x) -> UApp (aux ctx f, aux ctx x)
@@ -41,19 +41,18 @@ let remove_names (t : t) : nameless =
 
 let shift d t =
   let rec walk c = function
-    | UVar k -> if k >= c then UVar (k + d) else UVar k
-    | UAbs t1 -> UAbs (walk (c + 1) t1)
-    | UApp (t1, t2) -> UApp (walk c t1, walk c t2)
-    | UIf (t1, t2, t3) -> UIf (walk c t1, walk c t2, walk c t3)
-    | USeq (t1, t2) -> USeq (walk c t1, walk c t2)
+    | UVar i -> if i >= c then UVar (i + d) else UVar i
+    | UAbs t -> UAbs (walk (c + 1) t)
+    | UApp (f, x) -> UApp (walk c f, walk c x)
+    | UIf (cond, t, f) -> UIf (walk c cond, walk c t, walk c f)
+    | USeq (t, t') -> USeq (walk c t, walk c t')
     | UTuple ts -> UTuple (List.map ~f:(walk c) ts)
     | UProjTuple (t, i) -> UProjTuple (walk c t, i)
-    | URecord r -> URecord (List.map ~f:(fun (l, t) -> l, walk c t) r)
+    | URecord r -> URecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UProjRecord (t, l) -> UProjRecord (walk c t, l)
     | UVariant (l, t) -> UVariant (l, walk c t)
-    | UMatch (t, cases) ->
-      UMatch (walk c t, List.map ~f:(fun (l, tcase) -> l, walk (c + 1) tcase) cases)
-    | ULet (x, t1, t2) -> ULet (x, walk c t1, walk (c + 1) t2)
+    | UMatch (t, cs) ->
+      UMatch (walk c t, List.map ~f:(Tuple2.map_snd ~f:(walk (c + 1))) cs)
     | UFix t -> UFix (walk c t)
     | USucc t -> USucc (walk c t)
     | UPred t -> UPred (walk c t)
@@ -65,19 +64,18 @@ let shift d t =
 
 let subst j s t =
   let rec walk c = function
-    | UVar k -> if k = j + c then shift c s else UVar k
-    | UAbs t1 -> UAbs (walk (c + 1) t1)
-    | UApp (t1, t2) -> UApp (walk c t1, walk c t2)
-    | UIf (t1, t2, t3) -> UIf (walk c t1, walk c t2, walk c t3)
-    | USeq (t1, t2) -> USeq (walk c t1, walk c t2)
+    | UVar i -> if i = j + c then shift c s else UVar i
+    | UAbs t -> UAbs (walk (c + 1) t)
+    | UApp (f, x) -> UApp (walk c f, walk c x)
+    | UIf (cond, t, f) -> UIf (walk c cond, walk c t, walk c f)
+    | USeq (t, t') -> USeq (walk c t, walk c t')
     | UTuple ts -> UTuple (List.map ~f:(walk c) ts)
     | UProjTuple (t, i) -> UProjTuple (walk c t, i)
-    | URecord r -> URecord (List.map ~f:(fun (l, t) -> l, walk c t) r)
+    | URecord r -> URecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UProjRecord (t, l) -> UProjRecord (walk c t, l)
     | UVariant (l, t) -> UVariant (l, walk c t)
-    | UMatch (t, cases) ->
-      UMatch (walk c t, List.map ~f:(fun (l, tcase) -> l, walk (c + 1) tcase) cases)
-    | ULet (x, t1, t2) -> ULet (x, walk c t1, walk (c + 1) t2)
+    | UMatch (t, cs) ->
+      UMatch (walk c t, List.map ~f:(Tuple2.map_snd ~f:(walk (c + 1))) cs)
     | UFix t -> UFix (walk c t)
     | USucc t -> USucc (walk c t)
     | UPred t -> UPred (walk c t)
@@ -96,28 +94,28 @@ let rec is_value = function
   | _ -> false
 ;;
 
+let subst_top b t = shift (-1) (subst 0 (shift 1 b) t)
+
 exception NoRuleApplies
 
 let rec eval1 = function
-  | UApp (UAbs t12, v2) when is_value v2 -> shift (-1) (subst 0 (shift 1 v2) t12)
-  | UApp (v1, t2) when is_value v1 -> UApp (v1, eval1 t2)
-  | UApp (t1, t2) -> UApp (eval1 t1, t2)
-  | UIf (UTrue, t2, _) -> t2
-  | UIf (UFalse, _, t3) -> t3
-  | UIf (t1, t2, t3) -> UIf (eval1 t1, t2, t3)
+  | UApp (UAbs f, x) when is_value x -> subst_top x f
+  | UApp (f, x) when is_value f -> UApp (f, eval1 x)
+  | UApp (f, x) -> UApp (eval1 f, x)
+  | UIf (UTrue, t, _) -> t
+  | UIf (UFalse, _, f) -> f
+  | UIf (c, t, f) -> UIf (eval1 c, t, f)
   | USucc t -> USucc (eval1 t)
   | UPred UZero -> UZero
-  | UPred (USucc nv1) when is_value nv1 -> nv1
-  | UPred t1 -> UPred (eval1 t1)
+  | UPred (USucc t) when is_value t -> t
+  | UPred t -> UPred (eval1 t)
   | UIsZero UZero -> UTrue
-  | UIsZero (USucc nv1) when is_value nv1 -> UFalse
-  | UIsZero t1 -> UIsZero (eval1 t1)
-  | USeq (UUnit, t2) -> t2
-  | USeq (t1, t2) -> USeq (eval1 t1, t2)
-  | ULet (_, v1, t2) when is_value v1 -> shift (-1) (subst 0 (shift 1 v1) t2)
-  | ULet (x, t1, t2) -> ULet (x, eval1 t1, t2)
-  | UFix (UAbs t1) -> shift (-1) (subst 0 (shift 1 (UFix (UAbs t1))) t1)
-  | UFix t1 -> UFix (eval1 t1)
+  | UIsZero (USucc t) when is_value t -> UFalse
+  | UIsZero t -> UIsZero (eval1 t)
+  | USeq (UUnit, t) -> t
+  | USeq (t, t') -> USeq (eval1 t, t')
+  | UFix (UAbs t) -> subst_top (UFix (UAbs t)) t
+  | UFix t -> UFix (eval1 t)
   | UProjRecord (URecord r, l) -> List.Assoc.find_exn r ~equal:String.equal l
   | UProjRecord (t, l) -> UProjRecord (eval1 t, l)
   | UTuple ts ->
@@ -130,13 +128,14 @@ let rec eval1 = function
   | UProjTuple (UTuple ts, i) -> List.nth_exn ts i
   | UProjTuple (t, i) -> UProjTuple (eval1 t, i)
   | UMatch (UVariant (l, v), cases) when is_value v ->
-    let body = List.Assoc.find_exn cases ~equal:String.equal l in
-    shift (-1) (subst 0 (shift 1 v) body)
+    subst_top v (List.Assoc.find_exn cases ~equal:String.equal l)
   | UMatch (t, cases) -> UMatch (eval1 t, cases)
   | _ -> raise NoRuleApplies
 ;;
 
 let rec eval t =
   try eval (eval1 t) with
-  | NoRuleApplies -> t
+  | NoRuleApplies ->
+    assert (is_value t);
+    t
 ;;

@@ -126,7 +126,6 @@ type nameless =
   | UMatch of nameless * (string * nameless) list
   | USeq of nameless * nameless
   | UIf of nameless * nameless * nameless
-  | ULet of string * nameless * nameless
   | UVar of int
   | UAbs of nameless
   | UApp of nameless * nameless
@@ -164,7 +163,6 @@ let sexp_of_nameless t =
     | UIf (c, t, UUnit) -> List [ Atom "if"; parse c; Atom "then"; parse t ]
     | UIf (c, t, f) ->
       List [ Atom "if"; parse c; Atom "then"; parse t; Atom "else"; parse f ]
-    | ULet (v, b, t) -> List [ Atom "let"; Atom v; Atom "="; parse b; Atom "in"; parse t ]
     | UVar v -> Atom (Int.to_string v)
     | UAbs t -> List [ Atom "abs"; Atom "."; parse t ]
     | UApp (f, x) -> List [ parse f; parse x ]

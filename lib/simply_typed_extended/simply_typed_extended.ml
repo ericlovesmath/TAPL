@@ -1,5 +1,5 @@
 open Core
-include Types
+module Types = Types
 module Eval = Eval
 module Typecheck = Typecheck
 
@@ -12,7 +12,7 @@ let repl (s : string) =
      | Error ty_error -> print_s [%message (ty_error : Error.t)]
      | Ok ty ->
        let result = Eval.eval (Eval.remove_names t) in
-       print_s [%message (ty : ty) (result : nameless)])
+       print_s [%message (ty : Types.ty) (result : Types.nameless)])
 ;;
 
 let%expect_test "typechecker tests prior to extending" =
