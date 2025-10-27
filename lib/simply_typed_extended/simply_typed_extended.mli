@@ -1,12 +1,6 @@
-open Core
+module Eval = Eval
+module Typecheck = Typecheck
 include module type of Types
-
-(* Evaluates type of [t] *)
-val type_of : context -> t -> ty Or_error.t
-
-(* Evaluates normalized [t], should not fail on typechecked [t]
-   that does not contain closures *)
-val eval : t String.Map.t -> t -> t
 
 (* Reads and parses [string] input, prints result *)
 val repl : string -> unit

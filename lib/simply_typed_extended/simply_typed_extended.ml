@@ -1,235 +1,18 @@
 open Core
 include Types
-
-let assert_unique_fields fields =
-  if Set.length (String.Set.of_list fields) = List.length fields
-  then Ok ()
-  else error_s [%message "duplicated labels in fields" (fields : string list)]
-;;
-
-let rec type_of (ctx : context) (t : t) : ty Or_error.t =
-  let open Or_error.Let_syntax in
-  match t with
-  | EUnit -> Ok TyUnit
-  | ETrue | EFalse -> Ok TyBool
-  | ETuple ts ->
-    let%map tys = Or_error.all (List.map ~f:(type_of ctx) ts) in
-    TyTuple tys
-  | ERecord record ->
-    let type_of_field (l, t) =
-      let%map ty = type_of ctx t in
-      l, ty
-    in
-    let%bind fields = Or_error.all (List.map ~f:type_of_field record) in
-    let%bind () = assert_unique_fields (List.map ~f:fst fields) in
-    Ok (TyRecord fields)
-  | EProjTuple (t, i) ->
-    (match%bind type_of ctx t with
-     | TyTuple tys ->
-       (match List.nth tys i with
-        | Some ty -> Ok ty
-        | None ->
-          error_s [%message "tuple projection on invalid index" (tys : ty list) (i : int)])
-     | _ -> error_s [%message "expected tuple to project from" (t : t)])
-  | EProjRecord (t, l) ->
-    (match%bind type_of ctx t with
-     | TyRecord tys ->
-       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
-       (match List.Assoc.find tys l ~equal:String.equal with
-        | Some ty -> Ok ty
-        | None ->
-          error_s
-            [%message "record missing field" (tys : (string * ty) list) (l : string)])
-     | _ -> error_s [%message "expected record to project from" (t : t)])
-  | EVariant (l, ty, t) ->
-    (match ty with
-     | TyVariant tys ->
-       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
-       (match List.Assoc.find tys l ~equal:String.equal with
-        | Some ty_anno ->
-          let%bind ty_infer = type_of ctx t in
-          if equal_ty ty_infer ty_anno
-          then Ok ty
-          else error_s [%message "incorrect variant type" (ty_infer : ty) (ty_anno : ty)]
-        | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)])
-     | _ -> error_s [%message "expected annotation to be a variant" (ty : ty)])
-  | EMatch (t, cases) ->
-    let%bind ty = type_of ctx t in
-    (match ty with
-     | TyVariant tys ->
-       let case_labels = List.map ~f:(fun (l, _, _) -> l) cases in
-       let%bind () = assert_unique_fields case_labels in
-       let%bind () =
-         let variant_labels = List.map ~f:fst tys in
-         if String.Set.(equal (of_list case_labels) (of_list variant_labels))
-         then Ok ()
-         else
-           error_s
-             [%message
-               "unexpected cases for variant"
-                 (case_labels : string list)
-                 (variant_labels : string list)]
-       in
-       let ty_of_case (l, v, t) =
-         match List.Assoc.find tys l ~equal:String.equal with
-         | Some ty ->
-           let ctx = Map.set ctx ~key:v ~data:ty in
-           type_of ctx t
-         | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)]
-       in
-       let%bind ty_cases = Or_error.all (List.map ~f:ty_of_case cases) in
-       (match ty_cases with
-        | [] -> error_s (Atom "case statement needs to have at least one branch")
-        | hd :: tl ->
-          if List.for_all tl ~f:(equal_ty hd)
-          then Ok hd
-          else error_s [%message "unequal types across branches" (ty_cases : ty list)])
-     | _ -> error_s [%message "expected match on variant" (ty : ty)])
-  | ESeq (t, t') ->
-    let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t TyUnit
-    then type_of ctx t'
-    else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty)]
-  | EIf (c, t, f) ->
-    let%bind ty_c = type_of ctx c in
-    if not (equal_ty ty_c TyBool)
-    then error_s [%message "[if] condition is not TyBool" (ty_c : ty)]
-    else (
-      let%bind ty_t = type_of ctx t in
-      let%bind ty_f = type_of ctx f in
-      if not (equal_ty ty_t ty_f)
-      then error_s [%message "[if] branches have unequal types" (ty_t : ty) (ty_f : ty)]
-      else Ok ty_t)
-  | ELet (v, b, t) ->
-    let%bind ty_b = type_of ctx b in
-    let ctx = Map.set ctx ~key:v ~data:ty_b in
-    type_of ctx t
-  | EVar v ->
-    (match Map.find ctx v with
-     | Some ty -> Ok ty
-     | None -> error_s [%message "var not in context" v (ctx : context)])
-  | EAbs (v, ty_v, t) ->
-    let ctx = Map.set ctx ~key:v ~data:ty_v in
-    let%map ty_t = type_of ctx t in
-    TyArrow (ty_v, ty_t)
-  | EApp (f, x) ->
-    let%bind ty_f = type_of ctx f in
-    (match ty_f with
-     | TyArrow (ty_arg, ty_body) ->
-       let%bind ty_x = type_of ctx x in
-       if equal_ty ty_arg ty_x
-       then Ok ty_body
-       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
-     | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
-  | EAs (t, ty_annotated) ->
-    let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t ty_annotated
-    then Ok ty_t
-    else
-      error_s
-        [%message "annotated and derived type differ" (ty_t : ty) (ty_annotated : ty)]
-  | EZero -> Ok TyNat
-  | ESucc t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty)])
-  | EPred t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty)])
-  | EIsZero t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyBool
-     | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
-  | EFix t ->
-    (match%bind type_of ctx t with
-     | TyArrow (ty_l, ty_r) when equal_ty ty_l ty_r -> Ok ty_l
-     | ty_t -> error_s [%message "fix expects function of 'a -> 'a" (ty_t : ty)])
-;;
-
-let rec eval (ctx : t String.Map.t) (t : t) : t =
-  let fail () = raise_s [%message "eval failed" (ctx : t String.Map.t) (t : t)] in
-  match t with
-  | EUnit | ETrue | EFalse | EZero | EVariant _ | EAbs _ -> t
-  | ETuple t -> ETuple (List.map ~f:(eval ctx) t)
-  | ERecord t -> ERecord (List.map ~f:(fun (l, t) -> l, eval ctx t) t)
-  | EIf (c, t, f) ->
-    (match eval ctx c with
-     | ETrue -> eval ctx t
-     | EFalse -> eval ctx f
-     | _ -> fail ())
-  | EProjTuple (t, i) ->
-    (match eval ctx t with
-     | ETuple tup ->
-       (match List.nth tup i with
-        | Some t -> t
-        | None -> fail ())
-     | _ -> fail ())
-  | EProjRecord (t, l) ->
-    (match eval ctx t with
-     | ERecord tup ->
-       (match List.Assoc.find tup l ~equal:String.equal with
-        | Some t -> t
-        | None -> fail ())
-     | _ -> fail ())
-  | ESeq (t, t') ->
-    ignore (eval ctx t);
-    eval ctx t'
-  | ESucc t -> ESucc (eval ctx t)
-  | EPred t ->
-    (match eval ctx t with
-     | EZero -> EZero
-     | ESucc t -> t
-     | _ -> fail ())
-  | EIsZero t ->
-    (match eval ctx t with
-     | EZero -> ETrue
-     | ESucc _ -> EFalse
-     | _ -> fail ())
-  | EAs (t, _) -> eval ctx t
-  | EMatch (t, cases) ->
-    (match eval ctx t with
-     | EVariant (l, _, variant) ->
-       (match List.find cases ~f:(fun (l', _, _) -> String.equal l' l) with
-        | Some (_, v, body) ->
-          let ctx = Map.set ctx ~key:v ~data:variant in
-          eval ctx body
-        | None -> fail ())
-     | _ -> fail ())
-  | ELet (v, b, t) ->
-    let b = eval ctx b in
-    eval (Map.set ctx ~key:v ~data:b) t
-  | EVar v ->
-    (match Map.find ctx v with
-     | Some t -> t
-     | None -> fail ())
-  | EApp (f, x) ->
-    let x = eval ctx x in
-    let f = eval ctx f in
-    (match f with
-     | EAbs (v, _, t) ->
-       let ctx = Map.set ctx ~key:v ~data:x in
-       eval ctx t
-     | _ -> fail ())
-  | EFix f ->
-    let f = eval ctx f in
-    (match f with
-     | EAbs (param, _, body) ->
-       let rec_fix = EFix f in
-       eval (Map.set ctx ~key:param ~data:rec_fix) body
-     | _ -> fail ())
-;;
+module Eval = Eval
+module Typecheck = Typecheck
 
 let repl (s : string) =
   let t = s |> Lexer.of_string |> Lexer.lex |> Parser.run Parser.t_p in
   match t with
   | Error parse_err -> print_s [%message (parse_err : Error.t)]
   | Ok t ->
-    (match type_of String.Map.empty t with
+    (match Typecheck.typecheck t with
      | Error ty_error -> print_s [%message (ty_error : Error.t)]
      | Ok ty ->
-       let result = eval String.Map.empty t in
-       print_s [%message (ty : ty) (result : t)])
+       let result = Eval.eval (Eval.remove_names t) in
+       print_s [%message (ty : ty) (result : nameless)])
 ;;
 
 let%expect_test "typechecker tests prior to extending" =
@@ -249,7 +32,7 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
   let id = "(fun x : bool -> x)" in
   repl id;
-  [%expect {| ((ty (bool -> bool)) (result (fun x : bool -> x))) |}];
+  [%expect {| ((ty (bool -> bool)) (result (abs . 0))) |}];
   repl [%string "(%{id} #t)"];
   [%expect {| ((ty bool) (result #t)) |}];
   repl [%string "(%{id} %{id})"];
@@ -261,18 +44,14 @@ let%expect_test "typechecker tests prior to extending" =
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
   repl "(fun x : (bool -> bool) -> x)";
-  [%expect
-    {|
-    ((ty ((bool -> bool) -> (bool -> bool)))
-     (result (fun x : (bool -> bool) -> x)))
-    |}]
+  [%expect {| ((ty ((bool -> bool) -> (bool -> bool))) (result (abs . 0))) |}]
 ;;
 
 let%expect_test "extended typechecker tests" =
   repl "#u";
   [%expect {| ((ty unit) (result #u)) |}];
   repl "fun x : A -> x";
-  [%expect {| ((ty (A -> A)) (result (fun x : A -> x))) |}];
+  [%expect {| ((ty (A -> A)) (result (abs . 0))) |}];
   repl "#t; #t";
   repl "#u; #u; #f";
   [%expect
@@ -297,20 +76,17 @@ let%expect_test "extended typechecker tests" =
   [%expect
     {|
     ((ty bool) (result #t))
-    ((ty (bool -> bool)) (result (fun x : bool -> x)))
+    ((ty (bool -> bool)) (result (abs . 0)))
     (ty_error
      ("annotated and derived type differ" (ty_t (bool -> bool))
       (ty_annotated bool)))
-   |}];
+    |}];
   repl "(fun x : A -> x) as (A -> A)";
-  [%expect {| ((ty (A -> A)) (result (fun x : A -> x))) |}];
+  [%expect {| ((ty (A -> A)) (result (abs . 0))) |}];
   let tup = "{ #t, (fun x : bool -> x), #f }" in
   repl tup;
   [%expect
-    {|
-    ((ty ({ bool , (bool -> bool) , bool }))
-     (result ({ #t , (fun x : bool -> x) , #f })))
-    |}];
+    {| ((ty ({ bool , (bool -> bool) , bool })) (result ({ #t , (abs . 0) , #f }))) |}];
   repl [%string "%{tup}.0"];
   repl [%string "%{tup}.1"];
   repl [%string "%{tup}.2"];
@@ -318,11 +94,11 @@ let%expect_test "extended typechecker tests" =
   [%expect
     {|
     ((ty bool) (result #t))
-    ((ty (bool -> bool)) (result (fun x : bool -> x)))
+    ((ty (bool -> bool)) (result (abs . 0)))
     ((ty bool) (result #f))
     (ty_error
      ("tuple projection on invalid index" (tys (bool (bool -> bool) bool)) (i 3)))
-     |}];
+    |}];
   let record = "{ one = #t, two = { nest = (fun x : bool -> x) }}" in
   repl record;
   repl [%string "%{record}.one"];
@@ -331,10 +107,10 @@ let%expect_test "extended typechecker tests" =
   [%expect
     {|
     ((ty ({ one : bool , two : ({ nest : (bool -> bool) }) }))
-     (result ({ one : #t , two : ({ nest : (fun x : bool -> x) }) })))
+     (result ({ one : #t , two : ({ nest : (abs . 0) }) })))
     ((ty bool) (result #t))
-    ((ty ({ nest : (bool -> bool) })) (result ({ nest : (fun x : bool -> x) })))
-    ((ty (bool -> bool)) (result (fun x : bool -> x)))
+    ((ty ({ nest : (bool -> bool) })) (result ({ nest : (abs . 0) })))
+    ((ty (bool -> bool)) (result (abs . 0)))
     |}];
   repl [%string "%{record}.three"];
   [%expect
@@ -349,12 +125,9 @@ let%expect_test "extended typechecker tests" =
   repl [%string "< some #t > as %{option}"];
   [%expect
     {|
-    ((ty (< some : bool , none >))
-     (result (< none : #u > as (< some : bool , none >))))
-    ((ty (< some : bool , none >))
-     (result (< some : #t > as (< some : bool , none >))))
-    ((ty (< some : bool , none >))
-     (result (< some : #t > as (< some : bool , none >))))
+    ((ty (< some : bool , none >)) (result (< none : #u >)))
+    ((ty (< some : bool , none >)) (result (< some : #t >)))
+    ((ty (< some : bool , none >)) (result (< some : #t >)))
     |}];
   repl [%string "< some #u > as %{option}"];
   repl [%string "< yes #t > as %{option}"];
@@ -394,8 +167,6 @@ let%expect_test "extended typechecker tests" =
     ((ty bool) (result #t))
     (ty_error ("expected succ to take nat" (ty_t bool)))
     |}];
-  repl "fix (fun x : bool -> x)";
-  [%expect {| ((ty bool) (result (fix (fun x : bool -> x)))) |}];
   repl
     {|
      letrec f : (nat -> nat) =
@@ -424,11 +195,7 @@ let%expect_test "cool examples" =
        in
        next (< thu > as %{weekday})
       |}];
-  [%expect
-    {|
-    ((ty (< mon , tue , wed , thu , fri >))
-     (result (< fri : #u > as (< mon , tue , wed , thu , fri >))))
-    |}]
+  [%expect {| ((ty (< mon , tue , wed , thu , fri >)) (result (< fri : #u >))) |}]
 ;;
 
 let%expect_test "addition (no closures)" =
@@ -442,6 +209,21 @@ let%expect_test "addition (no closures)" =
             then (xy.y)
             else (add ({ x = (pred (xy.x)) , y = (S (xy.y)) }))))
       in add { x = S (S Z), y = S (S Z) }
+      |}];
+  [%expect {| ((ty nat) (result (S (S (S (S Z)))))) |}]
+;;
+
+let%expect_test "addition (closures)" =
+  repl
+    [%string
+      {|
+      letrec add : (nat -> nat -> nat) =
+        (fun x : nat ->
+          (fun y : nat ->
+            (if (iszero x)
+              then y
+              else (add (pred x) (S y)))))
+      in add (S (S Z)) (S (S Z))
       |}];
   [%expect {| ((ty nat) (result (S (S (S (S Z)))))) |}]
 ;;
