@@ -10,6 +10,7 @@ type ty =
   | TyRecord of (string * ty) list
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
+  | TyRef of ty
 [@@deriving equal]
 
 (* Church-style simply typed lambda calculus *)
@@ -35,6 +36,9 @@ type t =
   | EPred of t
   | EIsZero of t
   | EFix of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
 
 let sexp_of_ty ty =
   let rec parse = function
@@ -66,6 +70,7 @@ let sexp_of_ty ty =
       in
       List ([ Atom "<" ] @ fields @ [ Atom ">" ])
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
+    | TyRef ty -> List [ parse ty; Atom "ref" ]
   in
   parse ty
 ;;
@@ -110,6 +115,9 @@ let sexp_of_t t =
     | EPred t -> List [ Atom "pred"; parse t ]
     | EIsZero t -> List [ Atom "iszero"; parse t ]
     | EFix t -> List [ Atom "fix"; parse t ]
+    | ERef t -> List [ Atom "ref"; parse t ]
+    | EDeref t -> List [ Atom "!"; parse t ]
+    | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
   in
   parse t
 ;;
@@ -134,6 +142,10 @@ type nameless =
   | UPred of nameless
   | UIsZero of nameless
   | UFix of nameless
+  | URef of nameless
+  | ULoc of int
+  | UDeref of nameless
+  | UAssign of int * nameless
 
 let sexp_of_nameless t =
   let rec parse = function
@@ -171,8 +183,10 @@ let sexp_of_nameless t =
     | UPred t -> List [ Atom "pred"; parse t ]
     | UIsZero t -> List [ Atom "iszero"; parse t ]
     | UFix t -> List [ Atom "fix"; parse t ]
+    | URef t -> List [ Atom "ref"; parse t ]
+    | ULoc i -> Atom (Int.to_string i)
+    | UDeref t -> List [ Atom "!"; parse t ]
+    | UAssign (i, t) -> List [ Atom (Int.to_string i); Atom ":="; parse t ]
   in
   parse t
 ;;
-
-type context = ty String.Map.t [@@deriving sexp_of]

@@ -1,5 +1,3 @@
-open Core
-
 type ty =
   | TyBase of char
   | TyUnit
@@ -9,6 +7,7 @@ type ty =
   | TyRecord of (string * ty) list
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
+  | TyRef of ty
 [@@deriving sexp_of, equal]
 
 (* Church-style simply typed lambda calculus *)
@@ -34,6 +33,9 @@ type t =
   | EPred of t
   | EIsZero of t
   | EFix of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
 [@@deriving sexp_of]
 
 type nameless =
@@ -56,6 +58,8 @@ type nameless =
   | UPred of nameless
   | UIsZero of nameless
   | UFix of nameless
+  | URef of nameless
+  | ULoc of int
+  | UDeref of nameless
+  | UAssign of int * nameless
 [@@deriving sexp_of]
-
-type context = ty String.Map.t [@@deriving sexp_of]

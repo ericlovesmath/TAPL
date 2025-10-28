@@ -227,3 +227,12 @@ let%expect_test "addition (closures)" =
       |}];
   [%expect {| ((ty nat) (result (S (S (S (S Z)))))) |}]
 ;;
+
+let%expect_test "ref tests" =
+  repl "let x = ref Z in !x";
+  [%expect {| ((ty nat) (result Z)) |}];
+  repl "let not = ref (fun x : bool -> if x then #f else #t) in (!not) #t";
+  [%expect {| ((ty bool) (result #f)) |}];
+  repl "let x = ref Z in (x := S Z); !x";
+  [%expect {| ((ty nat) (result (S Z))) |}]
+;;

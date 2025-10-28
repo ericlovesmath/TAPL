@@ -7,7 +7,7 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
-let rec type_of (ctx : context) (t : t) : ty Or_error.t =
+let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
   let open Or_error.Let_syntax in
   match t with
   | EUnit -> Ok TyUnit
@@ -107,7 +107,7 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
   | EVar v ->
     (match Map.find ctx v with
      | Some ty -> Ok ty
-     | None -> error_s [%message "var not in context" v (ctx : context)])
+     | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
   | EAbs (v, ty_v, t) ->
     let ctx = Map.set ctx ~key:v ~data:ty_v in
     let%map ty_t = type_of ctx t in
@@ -145,6 +145,22 @@ let rec type_of (ctx : context) (t : t) : ty Or_error.t =
     (match%bind type_of ctx t with
      | TyArrow (ty_l, ty_r) when equal_ty ty_l ty_r -> Ok ty_l
      | ty_t -> error_s [%message "fix expects function of 'a -> 'a" (ty_t : ty)])
+  | ERef t ->
+    let%map ty = type_of ctx t in
+    TyRef ty
+  | EDeref t ->
+    (match%bind type_of ctx t with
+     | TyRef ty -> Ok ty
+     | ty -> error_s [%message "deref expects ref" (ty : ty)])
+  | EAssign (v, t) ->
+    (match Map.find ctx v with
+     | Some (TyRef ty_v) ->
+       let%bind ty_t = type_of ctx t in
+       if equal_ty ty_v ty_t
+       then Ok TyUnit
+       else error_s [%message "assigning to ref of wrong type" (ty_v : ty) (ty_t : ty)]
+     | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty)]
+     | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
 ;;
 
 let typecheck = type_of String.Map.empty

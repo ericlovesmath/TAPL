@@ -35,6 +35,9 @@ let remove_names (t : t) : nameless =
     | EPred t -> UPred (aux ctx t)
     | EIsZero t -> UIsZero (aux ctx t)
     | EFix t -> UFix (aux ctx t)
+    | ERef t -> URef (aux ctx t)
+    | EDeref t -> UDeref (aux ctx t)
+    | EAssign (v, t) -> UAssign (find ctx v, aux ctx t)
   in
   aux [] t
 ;;
@@ -57,7 +60,14 @@ let shift d t =
     | USucc t -> USucc (walk c t)
     | UPred t -> UPred (walk c t)
     | UIsZero t -> UIsZero (walk c t)
-    | t -> t
+    | UUnit -> UUnit
+    | UTrue -> UTrue
+    | UFalse -> UFalse
+    | UZero -> UZero
+    | URef t -> URef (walk c t)
+    | ULoc i -> ULoc i
+    | UDeref t -> UDeref (walk c t)
+    | UAssign (v, t2) -> UAssign (v, walk c t2)
   in
   walk 0 t
 ;;
@@ -80,13 +90,20 @@ let subst j s t =
     | USucc t -> USucc (walk c t)
     | UPred t -> UPred (walk c t)
     | UIsZero t -> UIsZero (walk c t)
-    | t -> t
+    | UUnit -> UUnit
+    | UTrue -> UTrue
+    | UFalse -> UFalse
+    | UZero -> UZero
+    | URef t -> URef (walk c t)
+    | ULoc i -> ULoc i
+    | UDeref t -> UDeref (walk c t)
+    | UAssign (t1, t2) -> UAssign (t1, walk c t2)
   in
   walk 0 t
 ;;
 
 let rec is_value = function
-  | UAbs _ | UTrue | UFalse | UUnit | UZero -> true
+  | UAbs _ | UTrue | UFalse | UUnit | UZero | ULoc _ -> true
   | USucc t | UPred t | UVariant (_, t) | UProjRecord (t, _) | UProjTuple (t, _) ->
     is_value t
   | UTuple ts -> List.for_all ~f:is_value ts
@@ -98,44 +115,107 @@ let subst_top b t = shift (-1) (subst 0 (shift 1 b) t)
 
 exception NoRuleApplies
 
-let rec eval1 = function
-  | UApp (UAbs f, x) when is_value x -> subst_top x f
-  | UApp (f, x) when is_value f -> UApp (f, eval1 x)
-  | UApp (f, x) -> UApp (eval1 f, x)
-  | UIf (UTrue, t, _) -> t
-  | UIf (UFalse, _, f) -> f
-  | UIf (c, t, f) -> UIf (eval1 c, t, f)
-  | USucc t -> USucc (eval1 t)
-  | UPred UZero -> UZero
-  | UPred (USucc t) when is_value t -> t
-  | UPred t -> UPred (eval1 t)
-  | UIsZero UZero -> UTrue
-  | UIsZero (USucc t) when is_value t -> UFalse
-  | UIsZero t -> UIsZero (eval1 t)
-  | USeq (UUnit, t) -> t
-  | USeq (t, t') -> USeq (eval1 t, t')
-  | UFix (UAbs t) -> subst_top (UFix (UAbs t)) t
-  | UFix t -> UFix (eval1 t)
-  | UProjRecord (URecord r, l) -> List.Assoc.find_exn r ~equal:String.equal l
-  | UProjRecord (t, l) -> UProjRecord (eval1 t, l)
+let rec eval1 (mu : nameless list) = function
+  | UApp (UAbs f, x) when is_value x -> mu, subst_top x f
+  | UApp (f, x) when is_value f ->
+    let mu, x = eval1 mu x in
+    mu, UApp (f, x)
+  | UApp (f, x) ->
+    let mu, f = eval1 mu f in
+    mu, UApp (f, x)
+  | UIf (UTrue, t, _) -> mu, t
+  | UIf (UFalse, _, f) -> mu, f
+  | UIf (c, t, f) ->
+    let mu, c = eval1 mu c in
+    mu, UIf (c, t, f)
+  | USucc t ->
+    let mu, t = eval1 mu t in
+    mu, USucc t
+  | UPred UZero -> mu, UZero
+  | UPred (USucc t) when is_value t -> mu, t
+  | UPred t ->
+    let mu, t = eval1 mu t in
+    mu, UPred t
+  | UIsZero UZero -> mu, UTrue
+  | UIsZero (USucc t) when is_value t -> mu, UFalse
+  | UIsZero t ->
+    let mu, t = eval1 mu t in
+    mu, UIsZero t
+  | USeq (UUnit, t) -> mu, t
+  | USeq (t, t') ->
+    let mu, t = eval1 mu t in
+    mu, USeq (t, t')
+  | UFix (UAbs t) -> mu, subst_top (UFix (UAbs t)) t
+  | UFix t ->
+    let mu, t = eval1 mu t in
+    mu, UFix t
+  | UProjRecord (URecord r, l) -> mu, List.Assoc.find_exn r ~equal:String.equal l
+  | UProjRecord (t, l) ->
+    let mu, t = eval1 mu t in
+    mu, UProjRecord (t, l)
   | UTuple ts ->
     let rec step = function
       | [] -> raise NoRuleApplies
-      | t :: ts when not (is_value t) -> eval1 t :: ts
-      | t :: ts -> t :: step ts
+      | t :: ts when not (is_value t) ->
+        let mu, t = eval1 mu t in
+        mu, t :: ts
+      | t :: ts ->
+        let mu, ts = step ts in
+        mu, t :: ts
     in
-    UTuple (step ts)
-  | UProjTuple (UTuple ts, i) -> List.nth_exn ts i
-  | UProjTuple (t, i) -> UProjTuple (eval1 t, i)
+    let mu, ts = step ts in
+    mu, UTuple ts
+  | URecord ts ->
+    let rec step = function
+      | [] -> raise NoRuleApplies
+      | (l, t) :: ts when not (is_value t) ->
+        let mu, t = eval1 mu t in
+        mu, (l, t) :: ts
+      | t :: ts ->
+        let mu, ts = step ts in
+        mu, t :: ts
+    in
+    let mu, ts = step ts in
+    mu, URecord ts
+  | UProjTuple (UTuple ts, i) -> mu, List.nth_exn ts i
+  | UProjTuple (t, i) ->
+    let mu, t = eval1 mu t in
+    mu, UProjTuple (t, i)
   | UMatch (UVariant (l, v), cases) when is_value v ->
-    subst_top v (List.Assoc.find_exn cases ~equal:String.equal l)
-  | UMatch (t, cases) -> UMatch (eval1 t, cases)
+    mu, subst_top v (List.Assoc.find_exn cases ~equal:String.equal l)
+  | UMatch (t, cases) ->
+    let mu, t = eval1 mu t in
+    mu, UMatch (t, cases)
+  | URef t when not (is_value t) ->
+    let mu, t' = eval1 mu t in
+    mu, URef t'
+  | URef v when is_value v ->
+    let l = List.length mu in
+    let mu' = mu @ [ v ] in
+    mu', ULoc l
+  | UDeref t when not (is_value t) ->
+    let mu, t' = eval1 mu t in
+    mu, UDeref t'
+  | UDeref (ULoc i) ->
+    (match List.nth mu i with
+     | Some v -> mu, v
+     | None -> failwith "Invalid memory location dereferenced")
+  | UAssign (i, v) when is_value v ->
+    (match List.nth mu i with
+     | Some _ ->
+       let mu' = List.mapi mu ~f:(fun j ov -> if j = i then v else ov) in
+       mu', UUnit
+     | None -> failwith "Invalid memory location assigned")
   | _ -> raise NoRuleApplies
 ;;
 
-let rec eval t =
-  try eval (eval1 t) with
-  | NoRuleApplies ->
-    assert (is_value t);
-    t
+let eval t =
+  let rec aux mu t =
+    try
+      let mu, t = eval1 mu t in
+      aux mu t
+    with
+    | NoRuleApplies when is_value t -> t
+  in
+  aux [] t
 ;;

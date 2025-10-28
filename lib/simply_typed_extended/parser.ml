@@ -29,7 +29,7 @@ let rec ty_p =
   (ty_p <|> between `Paren ty_p) st
 
 and ty_atom_p =
-  fun st -> (ty_singles_p <|> ty_tuple_p <|> ty_record_p <|> ty_variant_p) st
+  fun st -> (ty_singles_p <|> ty_tuple_p <|> ty_record_p <|> ty_variant_p <|> ty_ref_p) st
 
 and ty_singles_p =
   satisfy_map (function
@@ -78,7 +78,8 @@ and ty_arrow_p =
    let%bind r = ty_p in
    return (TyArrow (l, r)))
     st
-;;
+
+and ty_ref_p = fun st -> (tok REF *> ty_p) st
 
 let%expect_test "ty parse tests" =
   let test s =
@@ -134,7 +135,6 @@ let%expect_test "ty parse tests" =
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   (* NOTE: Postfix parsing *)
    t_proj_p t <|> t_seq_p t <|> t_as_p t <|> t_app_p t <|> return t)
     st
 
@@ -162,9 +162,18 @@ and t_atom_p =
     | ISZERO -> t_iszero_p
     | FIX -> t_fix_p
     | FUN -> t_abs_p
+    | REF -> tok REF *> t_p >>| fun t -> ERef t
+    | BANG -> tok BANG *> t_p >>| fun t -> EDeref t
     | _ -> fail "commit: not a fixed prefix"
   in
-  (t_singles_p <|> t_commit_prefix_p) st
+  (t_assign_p <|> t_singles_p <|> t_commit_prefix_p) st
+
+and t_assign_p =
+  fun st ->
+  (let%bind v = ident_p in
+   let%bind t = tok ASSIGN *> t_p in
+   return (EAssign (v, t)))
+    st
 
 and t_let_p =
   fun st ->
@@ -225,8 +234,9 @@ and t_variant_p =
     st
 
 and t_seq_p t =
-  let%map t' = tok SEMI *> t_p in
-  ESeq (t, t')
+  match%map tok SEMI *> t_p with
+  | ESeq (t', t'') -> ESeq (ESeq (t, t'), t'')
+  | t' -> ESeq (t, t')
 
 and t_match_p =
   fun st ->
@@ -327,8 +337,8 @@ let%expect_test "t parse tests" =
   test "match pos as < p : nat , end > with | p n -> n | end -> #u";
   [%expect
     {|
-    (Ok (let x = (a ";" (b ";" c)) in (#t ";" #f)))
-    (Ok (let x = (a ";" (b ";" c)) in (#t ";" #f)))
+    (Ok (let x = ((a ";" b) ";" c) in (#t ";" #f)))
+    (Ok (let x = ((a ";" b) ";" c) in (#t ";" #f)))
     (Ok (match x with (some x -> #t) (none $_ -> #f)))
     (Ok (((f x) y) z))
     (Ok ((f (x y)) z))
@@ -346,5 +356,8 @@ let%expect_test "t parse tests" =
     (Ok (iszero (pred (S (S Z)))))
     (Ok (fix (S Z)))
     (Ok (fun x : bool -> x))
-    |}]
+    |}];
+  test "(v := S Z); let x = ref v in !x";
+  [%expect
+    {| (Ok ((v := (S Z)) ";" (let x = (ref v) in (! x)))) |}]
 ;;

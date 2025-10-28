@@ -42,6 +42,9 @@ type token =
   | BOOL
   | UNITTY
   | NAT
+  | BANG
+  | REF
+  | ASSIGN
   | INT of int
   | BASE of char
   | ID of string
@@ -106,10 +109,10 @@ let read_lexeme t =
     | '<' -> skip t; LANGLE
     | '>' -> skip t; RANGLE
     | ';' -> skip t; SEMI
-    | ':' -> skip t; COLON
     | ',' -> skip t; COMMA
     | '.' -> skip t; DOT
     | '|' -> skip t; BAR
+    | '!' -> skip t; BANG
     | '#' -> (
         skip t;
         match next t with
@@ -140,6 +143,7 @@ let read_lexeme t =
         | "with" -> WITH
         | "bool" -> BOOL
         | "nat" -> NAT
+        | "ref" -> REF
         | _ ->
             if String.length s = 1 && Char.(is_uppercase (of_string s))
             then BASE (Char.of_string s)
@@ -147,6 +151,8 @@ let read_lexeme t =
     | _ ->
         let s = read_while (fun c -> not Char.(is_alpha c || equal '#' c || is_whitespace c || equal '.' c)) t in
         match s with
+        | ":" -> COLON
+        | ":=" -> ASSIGN
         | "->" -> ARROW
         | _ -> failwith ("invalid token " ^ s)
     in
@@ -178,9 +184,10 @@ let%expect_test "lexer" =
   test "x as bool";
   test "match pos as < p : nat , end > with | p n -> n | end -> #u";
   test "match pos as<p:nat,end>with|p n->n|end->#u";
-  test "{ x : nat , y :{ bool:bool}}";
+  test "{ x : nat , y : { bool:bool}}";
   test "< some : nat, none >";
   test "{ x = #t , y = v.0 }.x";
+  test "v := S; let x = ref v in !x";
   [%expect
     {|
     (DOT)
@@ -205,5 +212,6 @@ let%expect_test "lexer" =
      RCURLY)
     (LANGLE (ID some) COLON NAT COMMA (ID none) RANGLE)
     (LCURLY (ID x) EQ TRUE COMMA (ID y) EQ (ID v) DOT (INT 0) RCURLY DOT (ID x))
+    ((ID v) ASSIGN SUCC SEMI LET (ID x) EQ REF (ID v) IN BANG (ID x))
     |}]
 ;;

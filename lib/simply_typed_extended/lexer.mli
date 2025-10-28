@@ -36,6 +36,9 @@ type token =
   | BOOL
   | UNITTY
   | NAT
+  | BANG
+  | REF
+  | ASSIGN
   | INT of int
   | BASE of char
   | ID of string
