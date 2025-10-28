@@ -104,8 +104,7 @@ let subst j s t =
 
 let rec is_value = function
   | UAbs _ | UTrue | UFalse | UUnit | UZero | ULoc _ -> true
-  | USucc t | UPred t | UVariant (_, t) | UProjRecord (t, _) | UProjTuple (t, _) ->
-    is_value t
+  | USucc t | UPred t | UVariant (_, t) -> is_value t
   | UTuple ts -> List.for_all ~f:is_value ts
   | URecord r -> List.for_all ~f:(Fn.compose is_value snd) r
   | _ -> false
@@ -115,107 +114,138 @@ let subst_top b t = shift (-1) (subst 0 (shift 1 b) t)
 
 exception NoRuleApplies
 
-let rec eval1 (mu : nameless list) = function
-  | UApp (UAbs f, x) when is_value x -> mu, subst_top x f
+module Store : sig
+  type 'a t
+
+  include Monad.S with type 'a t := 'a t
+
+  val set : int -> nameless -> unit t
+  val put : nameless -> int t
+  val index : int -> nameless t
+  val fix : ('a -> 'a t) -> 'a -> 'a
+end = struct
+  module T = struct
+    type 'a t = nameless list -> 'a * nameless list
+
+    let return x s = x, s
+
+    let bind m ~f s =
+      let x, s' = m s in
+      f x s'
+    ;;
+
+    let map = `Define_using_bind
+  end
+
+  include T
+  include Monad.Make (T)
+
+  let put x s = List.length s, s @ [ x ]
+  let set i x s = (), List.mapi s ~f:(fun i' n -> if i = i' then x else n)
+  let index n s = List.nth_exn s n, s
+
+  let fix m x =
+    let rec aux x st =
+      try
+        let x, st = (m x) st in
+        aux x st
+      with
+      | NoRuleApplies -> x
+    in
+    aux x []
+  ;;
+end
+
+let rec eval1 (t : nameless) : nameless Store.t =
+  let open Store.Let_syntax in
+  match t with
+  | UApp (UAbs f, x) when is_value x -> return (subst_top x f)
   | UApp (f, x) when is_value f ->
-    let mu, x = eval1 mu x in
-    mu, UApp (f, x)
+    let%map x = eval1 x in
+    UApp (f, x)
   | UApp (f, x) ->
-    let mu, f = eval1 mu f in
-    mu, UApp (f, x)
-  | UIf (UTrue, t, _) -> mu, t
-  | UIf (UFalse, _, f) -> mu, f
+    let%map f = eval1 f in
+    UApp (f, x)
+  | UIf (UTrue, t, _) -> return t
+  | UIf (UFalse, _, f) -> return f
   | UIf (c, t, f) ->
-    let mu, c = eval1 mu c in
-    mu, UIf (c, t, f)
+    let%map c = eval1 c in
+    UIf (c, t, f)
   | USucc t ->
-    let mu, t = eval1 mu t in
-    mu, USucc t
-  | UPred UZero -> mu, UZero
-  | UPred (USucc t) when is_value t -> mu, t
+    let%map t = eval1 t in
+    USucc t
+  | UPred UZero -> return UZero
+  | UPred (USucc t) when is_value t -> return t
   | UPred t ->
-    let mu, t = eval1 mu t in
-    mu, UPred t
-  | UIsZero UZero -> mu, UTrue
-  | UIsZero (USucc t) when is_value t -> mu, UFalse
+    let%map t = eval1 t in
+    UPred t
+  | UIsZero UZero -> return UTrue
+  | UIsZero (USucc t) when is_value t -> return UFalse
   | UIsZero t ->
-    let mu, t = eval1 mu t in
-    mu, UIsZero t
-  | USeq (UUnit, t) -> mu, t
+    let%map t = eval1 t in
+    UIsZero t
+  | USeq (UUnit, t) -> return t
   | USeq (t, t') ->
-    let mu, t = eval1 mu t in
-    mu, USeq (t, t')
-  | UFix (UAbs t) -> mu, subst_top (UFix (UAbs t)) t
+    let%map t = eval1 t in
+    USeq (t, t')
+  | UFix (UAbs t) -> return (subst_top (UFix (UAbs t)) t)
   | UFix t ->
-    let mu, t = eval1 mu t in
-    mu, UFix t
-  | UProjRecord (URecord r, l) -> mu, List.Assoc.find_exn r ~equal:String.equal l
+    let%map t = eval1 t in
+    UFix t
+  | UProjRecord (URecord r, l) -> return (List.Assoc.find_exn r ~equal:String.equal l)
   | UProjRecord (t, l) ->
-    let mu, t = eval1 mu t in
-    mu, UProjRecord (t, l)
+    let%map t = eval1 t in
+    UProjRecord (t, l)
   | UTuple ts ->
     let rec step = function
       | [] -> raise NoRuleApplies
       | t :: ts when not (is_value t) ->
-        let mu, t = eval1 mu t in
-        mu, t :: ts
+        let%map t = eval1 t in
+        t :: ts
       | t :: ts ->
-        let mu, ts = step ts in
-        mu, t :: ts
+        let%map ts = step ts in
+        t :: ts
     in
-    let mu, ts = step ts in
-    mu, UTuple ts
+    let%map ts = step ts in
+    UTuple ts
   | URecord ts ->
     let rec step = function
       | [] -> raise NoRuleApplies
       | (l, t) :: ts when not (is_value t) ->
-        let mu, t = eval1 mu t in
-        mu, (l, t) :: ts
+        let%map t = eval1 t in
+        (l, t) :: ts
       | t :: ts ->
-        let mu, ts = step ts in
-        mu, t :: ts
+        let%map ts = step ts in
+        t :: ts
     in
-    let mu, ts = step ts in
-    mu, URecord ts
-  | UProjTuple (UTuple ts, i) -> mu, List.nth_exn ts i
+    let%map ts = step ts in
+    URecord ts
+  | UProjTuple (UTuple ts, i) -> return (List.nth_exn ts i)
   | UProjTuple (t, i) ->
-    let mu, t = eval1 mu t in
-    mu, UProjTuple (t, i)
+    let%map t = eval1 t in
+    UProjTuple (t, i)
   | UMatch (UVariant (l, v), cases) when is_value v ->
-    mu, subst_top v (List.Assoc.find_exn cases ~equal:String.equal l)
+    return (subst_top v (List.Assoc.find_exn cases ~equal:String.equal l))
   | UMatch (t, cases) ->
-    let mu, t = eval1 mu t in
-    mu, UMatch (t, cases)
+    let%map t = eval1 t in
+    UMatch (t, cases)
   | URef t when not (is_value t) ->
-    let mu, t' = eval1 mu t in
-    mu, URef t'
+    let%map t = eval1 t in
+    URef t
   | URef v when is_value v ->
-    let l = List.length mu in
-    let mu' = mu @ [ v ] in
-    mu', ULoc l
+    let%map l = Store.put v in
+    ULoc l
   | UDeref t when not (is_value t) ->
-    let mu, t' = eval1 mu t in
-    mu, UDeref t'
-  | UDeref (ULoc i) ->
-    (match List.nth mu i with
-     | Some v -> mu, v
-     | None -> failwith "Invalid memory location dereferenced")
+    let%map t = eval1 t in
+    UDeref t
+  | UDeref (ULoc i) -> Store.index i
   | UAssign (i, v) when is_value v ->
-    (match List.nth mu i with
-     | Some _ ->
-       let mu' = List.mapi mu ~f:(fun j ov -> if j = i then v else ov) in
-       mu', UUnit
-     | None -> failwith "Invalid memory location assigned")
+    let%bind () = Store.set i v in
+    return UUnit
+  | UAssign (i, v) ->
+    let%map v = eval1 v in
+    UAssign (i, v)
   | _ -> raise NoRuleApplies
 ;;
 
-let eval t =
-  let rec aux mu t =
-    try
-      let mu, t = eval1 mu t in
-      aux mu t
-    with
-    | NoRuleApplies when is_value t -> t
-  in
-  aux [] t
-;;
+let eval t = Store.fix eval1 t
