@@ -7,10 +7,13 @@ module Simply_typed_repl = struct
   (** Gets line for stdin, waits for double newlines if [multiline] is on *)
   let rec get_input () =
     Out_channel.flush stdout;
-    let line = In_channel.(input_line_exn stdin) in
-    if !multiline && not (String.is_empty line || Char.equal (String.get line 0) ':')
-    then line ^ "\n" ^ get_input ()
-    else line
+    let line = In_channel.(input_line stdin) in
+    match line with
+    | None -> exit 0
+    | Some line ->
+      if !multiline && not (String.is_empty line || Char.equal (String.get line 0) ':')
+      then line ^ "\n" ^ get_input ()
+      else line
   ;;
 
   let rec repl () =
