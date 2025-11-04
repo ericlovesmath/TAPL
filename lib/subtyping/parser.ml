@@ -38,6 +38,8 @@ and ty_singles_p =
     | UNITTY -> Some TyUnit
     | BOOL -> Some TyBool
     | NAT -> Some TyNat
+    | TOP -> Some TyTop
+    | BOT -> Some TyBottom
     | BASE c -> Some (TyBase c)
     | _ -> None)
 
@@ -81,7 +83,7 @@ and ty_arrow_p =
    return (TyArrow (l, r)))
     st
 
-and ty_ref_p = fun st -> (tok REF *> ty_p) st
+and ty_ref_p = fun st -> (tok REF *> ty_p >>| fun ty -> TyRef ty) st
 
 let%expect_test "ty parse tests" =
   let test s =
@@ -94,6 +96,9 @@ let%expect_test "ty parse tests" =
   in
   test "A";
   test "bool";
+  test "top";
+  test "bot";
+  test "ref A";
   test "((  nat) )";
   test "nat -> unit";
   test "A -> X -> nat -> bool";
@@ -108,6 +113,9 @@ let%expect_test "ty parse tests" =
     {|
     (Ok A)
     (Ok bool)
+    (Ok top)
+    (Ok bot)
+    (Ok (A ref))
     (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
     (Ok (nat -> unit))
     (Ok (A -> (X -> (nat -> bool))))

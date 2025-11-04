@@ -34,14 +34,6 @@ let rec ( <: ) (ty : ty) (ty' : ty) =
 ;;
 
 let rec join (ty : ty) (ty' : ty) =
-  let rec join_fields r r' =
-    match r' with
-    | [] -> r
-    | (l, ty) :: tl ->
-      (match List.Assoc.find r l ~equal:String.equal with
-       | None -> join_fields ((l, ty) :: r) tl
-       | Some ty' -> join_fields (List.Assoc.add r l (join ty ty') ~equal:String.equal) tl)
-  in
   if ty <: ty'
   then ty'
   else if ty' <: ty
@@ -50,8 +42,25 @@ let rec join (ty : ty) (ty' : ty) =
     match ty, ty' with
     | TyBottom, _ -> ty'
     | _, TyBottom -> ty
-    | TyRecord r, TyRecord r' -> TyRecord (join_fields r r')
-    | TyVariant v, TyVariant v' -> TyVariant (join_fields v v')
+    | TyRecord r, TyRecord r' ->
+      let r'' =
+        List.filter_map r' ~f:(fun (l, ty) ->
+          let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
+          l, join ty ty')
+      in
+      if List.is_empty r'' then TyTop else TyRecord r''
+    | TyVariant v, TyVariant v' ->
+      let rec join_fields r r' =
+        match r' with
+        | [] -> r
+        | (l, ty) :: tl ->
+          (match List.Assoc.find r l ~equal:String.equal with
+           | None -> join_fields ((l, ty) :: r) tl
+           | Some ty' ->
+             let ty'' = List.Assoc.add r l (join ty ty') ~equal:String.equal in
+             join_fields ty'' tl)
+      in
+      TyVariant (join_fields v v')
     | TyTuple ts, TyTuple ts' ->
       (match List.map2 ts ts' ~f:join with
        | Ok ts'' -> TyTuple ts''

@@ -183,25 +183,6 @@ let%expect_test "extended typechecker tests" =
   [%expect {| (ty nat) |}]
 ;;
 
-let%expect_test "cool examples" =
-  let weekday = "(< mon , tue , wed , thu , fri >)" in
-  repl
-    [%string
-      {|
-      let next =
-        fun w : %{weekday} ->
-          match w with
-          | mon -> < tue >
-          | tue -> < wed >
-          | wed -> < thu >
-          | thu -> < fri >
-          | fri -> < mon >
-       in
-       next (< thu >)
-      |}];
-  [%expect {| (ty (< thu , mon , tue , fri , wed >)) |}]
-;;
-
 let%expect_test "addition (no closures)" =
   let pair = "({ x : nat , y : nat })" in
   repl
@@ -239,4 +220,50 @@ let%expect_test "ref tests" =
   [%expect {| (ty bool) |}];
   repl "let x = ref Z in (x := S Z); !x";
   [%expect {| (ty nat) |}]
+;;
+
+let%expect_test "subsumption tests" =
+  repl "(fun x : { a : nat } -> x.a) { a = Z, b = S Z }";
+  [%expect {| (ty nat) |}];
+  repl "(fun x : top -> x) (ref #t)";
+  [%expect {| (ty top) |}];
+  repl "(fun x : top -> x as bool) (ref #t)";
+  [%expect {| (ty bool) |}];
+  repl "(fun r : { y : bool, x : bool } -> { x = r.y, y = r.x }) { x = #t, y = #f }";
+  [%expect {| (ty ({ x : bool , y : bool })) |}];
+  repl
+    {|
+       (fun r : ref { y : bool, x : bool } ->
+         r := { x = (!r).y, y = (!r).x })
+       ref { x = #t, y = #f }
+       |};
+  [%expect {| (ty unit) |}]
+;;
+
+let%expect_test "join tests" =
+  repl "if #t then { x = Z } else { y = #f }";
+  [%expect {| (ty top) |}];
+  repl "if #t then { x = Z, y = #f } else { z = #f, x = S Z }";
+  [%expect {| (ty ({ x : nat })) |}];
+  repl "if #t then < some #t > else < none >";
+  [%expect {| (ty (< none , some : bool >)) |}];
+  repl "if #t then < some #t > else < none >";
+  [%expect {| (ty (< none , some : bool >)) |}];
+  repl "if #t then #t as bot else #t";
+  [%expect {| (ty bool) |}];
+  repl
+    [%string
+      {|
+      let next =
+        fun w : <mon, tue, wed, thu, fri> ->
+          match w with
+          | mon -> < tue >
+          | tue -> < wed >
+          | wed -> < thu >
+          | thu -> < fri >
+          | fri -> < mon >
+       in
+       next (< thu >)
+      |}];
+  [%expect {| (ty (< thu , mon , tue , fri , wed >)) |}]
 ;;
