@@ -58,8 +58,40 @@
 
 - Simple REPL interface (not a true repl, just expression evaluator)
 
+# Week 4
+
+- Completely move `sexp` based tests to `chomp` based test
+- `shift`/`subst` based evaluation of `simply_typed_extended`
+
+    - Closures naturally supported now, added tests
+    - Refactor to use `eval1` to follow small step semantics more directly
+
+- Merging typechecker and evaluation tests
+- `ref`, `!`, and `:=` type checking and parsing, adding tests
+- Refactoring using `Store` (state monad implementation of `mu`) for `ref`-related evaluation
+- Fix issue in REPL where `Ctrl-D` causes error due to `In_channel.input_line_exn`
+
+# Week 5
+
+- Move `Lexer` to `chomp` since it will be shared for most impls, but keep generic `Parser` functor
+- Start work on `subtyping`
+
+    - Add parsers for `top` type and modified `variants` (no longer needs to be ascribed to type), patching tests
+    - Implement subtyping `<:` and patch in terms that don't require `join`/`meet`, replacing most `equal_ty`s
+    - `join` for `if` and `match`, adding tests
+    - Minimal `bot` type implemented
+    - Add `error` form with `bot` type, adding tests
+    - Set `bool <: nat` (implicitly, `#f => 0` and `#t => 1`)
+
+- Generic REPL implementation supporting `subtyping`
+- Makefile
+
 # TODO
 
 - REPL interface for type inference and evaluation
-- Ref / List / Exceptions, maybe?
+- List / Arrays / Exceptions
 - Push Bonsai code
+- `meet` (as in `join`/`meet`)
+- Evaluator for `subtyping`, coercion semantics for runtime evaluation in `subtyping`?
+- Upload notes on TAPL to Github
+- Chapter 18/19 tests with objects

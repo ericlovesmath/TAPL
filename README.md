@@ -5,3 +5,5 @@ OCaml implementations of selected chapters in [Types and Programming Languages](
 Run `dune test` to run [let_expect](https://github.com/janestreet/ppx_expect) tests, and `dune utop` to explore. `dune promote` will update tests.
 
 Run `dune build` and `rlwrap ./_build/default/bin/main.exe -impl <IMPL>` for a simple REPL interface
+
+The `Makefile` provides convenient wrappers for building and running code
