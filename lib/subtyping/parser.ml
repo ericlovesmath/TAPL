@@ -231,8 +231,7 @@ and t_variant_p =
      return (label, value)
    in
    let%bind label, value = between `Angle variant_p in
-   let%bind ty = tok AS *> ty_p in
-   return (EVariant (label, ty, value)))
+   return (EVariant (label, value)))
     st
 
 and t_seq_p t =
@@ -312,8 +311,8 @@ let%expect_test "t parse tests" =
   test "{ #t , #f,#t}.0";
   test "{ #t , #f,#t}.22";
   test "{ x = #t , y = v.0 }.x";
-  test "< some x > as < some : nat, none >";
-  test "< none > as < some : nat, none >";
+  test "< some x >";
+  test "< none >";
   [%expect
     {|
     (Ok ({ ({ #t , (if #t then b) }) , #f , #t }))
@@ -336,7 +335,7 @@ let%expect_test "t parse tests" =
   test "f (x y) z";
   test "match f (x y) z with | some x -> #t | none -> #f";
   test "x as bool";
-  test "match pos as < p : nat , end > with | p n -> n | end -> #u";
+  test "match pos with | p n -> n | end -> #u";
   [%expect
     {|
     (Ok (let x = ((a ";" b) ";" c) in (#t ";" #f)))

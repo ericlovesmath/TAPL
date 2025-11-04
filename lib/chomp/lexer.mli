@@ -39,6 +39,7 @@ type token =
   | BANG
   | REF
   | ASSIGN
+  | TOP
   | INT of int
   | BASE of char
   | ID of string

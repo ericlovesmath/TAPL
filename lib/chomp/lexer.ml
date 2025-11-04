@@ -45,6 +45,7 @@ type token =
   | BANG
   | REF
   | ASSIGN
+  | TOP
   | INT of int
   | BASE of char
   | ID of string
@@ -144,6 +145,7 @@ let read_lexeme t =
         | "bool" -> BOOL
         | "nat" -> NAT
         | "ref" -> REF
+        | "top" -> TOP
         | _ ->
             if String.length s = 1 && Char.(is_uppercase (of_string s))
             then BASE (Char.of_string s)

@@ -3,6 +3,7 @@ open Parser
 module Types = Types
 module Typecheck = Typecheck
 
+(* NOTE: There is no evaluation, but it should be identical to [simply_typed_extended] if needed *)
 let repl (s : string) =
   let t = s |> Lexer.of_string |> Lexer.lex |> Parser.run t_p in
   let sexp =
@@ -120,8 +121,8 @@ let%expect_test "extended typechecker tests" =
       (l three)))
     |}];
   let option = "< some : bool , none >" in
-  repl [%string "< none > as %{option}"];
-  repl [%string "< some #t > as %{option}"];
+  repl [%string "< none >"];
+  repl [%string "< some #t >"];
   repl [%string "< some #t > as %{option}"];
   [%expect
     {|
@@ -129,8 +130,8 @@ let%expect_test "extended typechecker tests" =
     (ty (< some : bool , none >))
     (ty (< some : bool , none >))
     |}];
-  repl [%string "< some #u > as %{option}"];
-  repl [%string "< yes #t > as %{option}"];
+  repl [%string "< some #u >"];
+  repl [%string "< yes #t >"];
   repl [%string "< some #t > as < some : bool , some : bool >"];
   [%expect
     {|
@@ -138,7 +139,7 @@ let%expect_test "extended typechecker tests" =
     (type_err ("field missing in variant" (ty (< some : bool , none >)) (l yes)))
     (type_err ("duplicated labels in fields" (fields (some some))))
     |}];
-  let some_true = [%string "< some #t > as %{option}"] in
+  let some_true = "< some #t >" in
   repl [%string "match %{some_true} with | some x -> x | none -> #t"];
   [%expect {| (ty bool) |}];
   repl [%string "match %{some_true} with | some x -> x | none -> #u"];
@@ -187,13 +188,13 @@ let%expect_test "cool examples" =
       let next =
         fun w : %{weekday} ->
           match w with
-          | mon -> < tue > as %{weekday}
-          | tue -> < wed > as %{weekday}
-          | wed -> < thu > as %{weekday}
-          | thu -> < fri > as %{weekday}
-          | fri -> < mon > as %{weekday}
+          | mon -> < tue >
+          | tue -> < wed >
+          | wed -> < thu >
+          | thu -> < fri >
+          | fri -> < mon >
        in
-       next (< thu > as %{weekday})
+       next (< thu >)
       |}];
   [%expect {| (ty (< mon , tue , wed , thu , fri >)) |}]
 ;;
