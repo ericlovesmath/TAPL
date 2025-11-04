@@ -15,7 +15,7 @@
         in
         pkgs.mkShell {
           packages = with pkgs; [
-            opam
+            opam rlwrap
 
             # Required packages to build Bonsai, in case not already installed
             gmp pkg-config openssl_legacy zlib
