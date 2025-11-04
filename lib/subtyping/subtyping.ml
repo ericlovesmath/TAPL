@@ -23,13 +23,10 @@ let%expect_test "typechecker tests prior to extending" =
   repl "if #t then #f else #f";
   [%expect {| (ty bool) |}];
   repl "if (fun x : bool -> x) then #t else #f";
-  [%expect {| (type_err ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
-  repl "if #t then #t else (fun x : bool -> x)";
   [%expect
-    {|
-    (type_err
-     ("[if] branches have unequal types" (ty_t bool) (ty_f (bool -> bool))))
-    |}];
+    {| (type_err ("[if] condition doesn't subsume to TyBool" (ty_c (bool -> bool)))) |}];
+  repl "if #t then #t else (fun x : bool -> x)";
+  [%expect {| (ty top) |}];
   repl "y";
   [%expect {| (type_err ("var not in context" y (ctx ()))) |}];
   let id = "(fun x : bool -> x)" in
@@ -42,7 +39,7 @@ let%expect_test "typechecker tests prior to extending" =
     {|
     (type_err
      ("arg's type does not subsume expected input type" (ty_f (bool -> bool))
-      (ty_arg bool)))
+      (ty_x (bool -> bool))))
     |}];
   repl "(#t #f)";
   [%expect {| (type_err ("attempting to apply to non-arrow type" (ty_f bool))) |}];
@@ -86,8 +83,7 @@ let%expect_test "extended typechecker tests" =
   [%expect {| (ty (A -> A)) |}];
   let tup = "{ #t, (fun x : bool -> x), #f }" in
   repl tup;
-  [%expect
-    {| (ty ({ bool , (bool -> bool) , bool })) |}];
+  [%expect {| (ty ({ bool , (bool -> bool) , bool })) |}];
   repl [%string "%{tup}.0"];
   repl [%string "%{tup}.1"];
   repl [%string "%{tup}.2"];
@@ -140,13 +136,15 @@ let%expect_test "extended typechecker tests" =
     |}];
   let some_true = "< some #t >" in
   repl [%string "match %{some_true} with | some x -> x | none -> #t"];
-  [%expect {|
+  [%expect
+    {|
     (type_err
      ("unexpected cases for variant" (case_labels (some none))
       (variant_labels (some))))
     |}];
   repl [%string "match %{some_true} with | some x -> x | none -> #u"];
-  [%expect {|
+  [%expect
+    {|
     (type_err
      ("unexpected cases for variant" (case_labels (some none))
       (variant_labels (some))))
@@ -201,11 +199,7 @@ let%expect_test "cool examples" =
        in
        next (< thu >)
       |}];
-  [%expect {|
-    (type_err
-     ("unequal types across branches"
-      (ty_cases ((< tue >) (< wed >) (< thu >) (< fri >) (< mon >)))))
-    |}]
+  [%expect {| (ty (< thu , mon , tue , fri , wed >)) |}]
 ;;
 
 let%expect_test "addition (no closures)" =

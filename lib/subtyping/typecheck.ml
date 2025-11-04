@@ -21,13 +21,41 @@ let rec ( <: ) (ty : ty) (ty' : ty) =
     | _, TyTop -> true
     | TyTuple ts, TyTuple ts' ->
       (match List.for_all2 ts ts' ~f:( <: ) with
-       | Ok _ -> true
-       | Unequal_lengths -> false)
+       | Ok true -> true
+       | Ok false | Unequal_lengths -> false)
     | TyRecord r, TyRecord r' -> is_subtype_fields r r'
-    | TyVariant v, TyVariant v' -> is_subtype_fields v v'
+    | TyVariant v, TyVariant v' ->
+      (* NOTE: The switch of [v] and [v'] is intentional *)
+      is_subtype_fields v' v
     | TyArrow (a, b), TyArrow (a', b') -> a <: a' && b <: b'
     | TyRef t, TyRef t' -> t <: t' && t' <: t
     | _ -> false)
+;;
+
+let rec join (ty : ty) (ty' : ty) =
+  let rec join_fields r r' =
+    match r' with
+    | [] -> r
+    | (l, ty) :: tl ->
+      (match List.Assoc.find r l ~equal:String.equal with
+       | None -> join_fields ((l, ty) :: r) tl
+       | Some ty' -> join_fields (List.Assoc.add r l (join ty ty') ~equal:String.equal) tl)
+  in
+  if ty <: ty'
+  then ty'
+  else if ty' <: ty
+  then ty
+  else (
+    match ty, ty' with
+    | TyRecord r, TyRecord r' -> TyRecord (join_fields r r')
+    | TyVariant v, TyVariant v' -> TyVariant (join_fields v v')
+    | TyTuple ts, TyTuple ts' ->
+      (match List.map2 ts ts' ~f:join with
+       | Ok ts'' -> TyTuple ts''
+       | Unequal_lengths -> TyTop)
+    | TyArrow (a, b), TyArrow (a', b') -> TyArrow (join a a', join b b')
+    | TyRef t, TyRef t' -> TyRef (join t t')
+    | _ -> TyTop)
 ;;
 
 let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
@@ -68,7 +96,6 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     let%map ty = type_of ctx t in
     TyVariant [ l, ty ]
   | EMatch (t, cases) ->
-    (* TODO: Join *)
     let%bind ty = type_of ctx t in
     (match ty with
      | TyVariant tys ->
@@ -92,13 +119,9 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
            type_of ctx t
          | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)]
        in
-       let%bind ty_cases = Or_error.all (List.map ~f:ty_of_case cases) in
-       (match ty_cases with
+       (match%bind Or_error.all (List.map ~f:ty_of_case cases) with
         | [] -> error_s (Atom "case statement needs to have at least one branch")
-        | hd :: tl ->
-          if List.for_all tl ~f:(equal_ty hd)
-          then Ok hd
-          else error_s [%message "unequal types across branches" (ty_cases : ty list)])
+        | hd :: tl -> Ok (List.fold_right tl ~f:join ~init:hd))
      | _ -> error_s [%message "expected match on variant" (ty : ty)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
@@ -106,16 +129,13 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     then type_of ctx t'
     else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty)]
   | EIf (c, t, f) ->
-    (* TODO: Join *)
     let%bind ty_c = type_of ctx c in
-    if not (equal_ty ty_c TyBool)
-    then error_s [%message "[if] condition is not TyBool" (ty_c : ty)]
+    if not (ty_c <: TyBool)
+    then error_s [%message "[if] condition doesn't subsume to TyBool" (ty_c : ty)]
     else (
       let%bind ty_t = type_of ctx t in
       let%bind ty_f = type_of ctx f in
-      if not (equal_ty ty_t ty_f)
-      then error_s [%message "[if] branches have unequal types" (ty_t : ty) (ty_f : ty)]
-      else Ok ty_t)
+      Ok (join ty_t ty_f))
   | ELet (v, b, t) ->
     let%bind ty_b = type_of ctx b in
     let ctx = Map.set ctx ~key:v ~data:ty_b in
@@ -138,7 +158,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
        else
          error_s
            [%message
-             "arg's type does not subsume expected input type" (ty_f : ty) (ty_arg : ty)]
+             "arg's type does not subsume expected input type" (ty_f : ty) (ty_x : ty)]
      | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
     (* NOTE: Ascription does downcasting *)
