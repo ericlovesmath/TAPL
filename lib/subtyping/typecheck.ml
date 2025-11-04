@@ -20,6 +20,7 @@ let rec ( <: ) (ty : ty) (ty' : ty) =
     match ty, ty' with
     | _, TyTop -> true
     | TyBottom, _ -> true
+    | TyBool, TyNat -> true
     | TyTuple ts, TyTuple ts' ->
       (match List.for_all2 ts ts' ~f:( <: ) with
        | Ok true -> true

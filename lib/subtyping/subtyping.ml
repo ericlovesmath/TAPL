@@ -169,7 +169,7 @@ let%expect_test "extended typechecker tests" =
     (ty nat)
     (ty bool)
     (ty bool)
-    (type_err ("expected succ to take term subsumed to nat" (ty_t bool)))
+    (ty nat)
     |}];
   repl
     {|
