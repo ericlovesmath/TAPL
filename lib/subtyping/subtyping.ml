@@ -41,7 +41,8 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect
     {|
     (type_err
-     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_arg bool)))
+     ("arg's type does not subsume expected input type" (ty_f (bool -> bool))
+      (ty_arg bool)))
     |}];
   repl "(#t #f)";
   [%expect {| (type_err ("attempting to apply to non-arrow type" (ty_f bool))) |}];
@@ -79,9 +80,7 @@ let%expect_test "extended typechecker tests" =
     {|
     (ty bool)
     (ty (bool -> bool))
-    (type_err
-     ("annotated and derived type differ" (ty_t (bool -> bool))
-      (ty_annotated bool)))
+    (ty bool)
     |}];
   repl "(fun x : A -> x) as (A -> A)";
   [%expect {| (ty (A -> A)) |}];
@@ -126,8 +125,8 @@ let%expect_test "extended typechecker tests" =
   repl [%string "< some #t > as %{option}"];
   [%expect
     {|
-    (ty (< some : bool , none >))
-    (ty (< some : bool , none >))
+    (ty (< none >))
+    (ty (< some : bool >))
     (ty (< some : bool , none >))
     |}];
   repl [%string "< some #u >"];
@@ -135,22 +134,28 @@ let%expect_test "extended typechecker tests" =
   repl [%string "< some #t > as < some : bool , some : bool >"];
   [%expect
     {|
-    (type_err ("incorrect variant type" (ty_infer unit) (ty_anno bool)))
-    (type_err ("field missing in variant" (ty (< some : bool , none >)) (l yes)))
-    (type_err ("duplicated labels in fields" (fields (some some))))
+    (ty (< some >))
+    (ty (< yes : bool >))
+    (ty (< some : bool , some : bool >))
     |}];
   let some_true = "< some #t >" in
   repl [%string "match %{some_true} with | some x -> x | none -> #t"];
-  [%expect {| (ty bool) |}];
+  [%expect {|
+    (type_err
+     ("unexpected cases for variant" (case_labels (some none))
+      (variant_labels (some))))
+    |}];
   repl [%string "match %{some_true} with | some x -> x | none -> #u"];
-  [%expect {| (type_err ("unequal types across branches" (ty_cases (bool unit)))) |}];
+  [%expect {|
+    (type_err
+     ("unexpected cases for variant" (case_labels (some none))
+      (variant_labels (some))))
+    |}];
   repl [%string "match %{some_true} with | some x -> #t"];
   repl [%string "match %{some_true} with | some x -> #t | some x -> #t | none -> #t"];
   [%expect
     {|
-    (type_err
-     ("unexpected cases for variant" (case_labels (some))
-      (variant_labels (some none))))
+    (ty bool)
     (type_err ("duplicated labels in fields" (fields (some some none))))
     |}];
   repl "Z";
@@ -166,7 +171,7 @@ let%expect_test "extended typechecker tests" =
     (ty nat)
     (ty bool)
     (ty bool)
-    (type_err ("expected succ to take nat" (ty_t bool)))
+    (type_err ("expected succ to take term subsumed to nat" (ty_t bool)))
     |}];
   repl
     {|
@@ -196,7 +201,11 @@ let%expect_test "cool examples" =
        in
        next (< thu >)
       |}];
-  [%expect {| (ty (< mon , tue , wed , thu , fri >)) |}]
+  [%expect {|
+    (type_err
+     ("unequal types across branches"
+      (ty_cases ((< tue >) (< wed >) (< thu >) (< fri >) (< mon >)))))
+    |}]
 ;;
 
 let%expect_test "addition (no closures)" =

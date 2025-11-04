@@ -320,8 +320,8 @@ let%expect_test "t parse tests" =
     (Ok (({ #t , #f , #t }) . 0))
     (Ok (({ #t , #f , #t }) . 22))
     (Ok (({ x : #t , y : (v . 0) }) . x))
-    (Ok (< some : x > as (< some : nat , none >)))
-    (Ok (< none : #u > as (< some : nat , none >)))
+    (Ok (< some : x >))
+    (Ok (< none : #u >))
     |}];
   test "let x = a; b; c in #t; #f";
   test "let x = a ; b ; c in #t; #f";
@@ -345,7 +345,7 @@ let%expect_test "t parse tests" =
     (Ok ((f (x y)) z))
     (Ok (match ((f (x y)) z) with (some x -> #t) (none $_ -> #f)))
     (Ok (x as bool))
-    (Ok (match (pos as (< p : nat , end >)) with (p n -> n) (end $_ -> #u)))
+    (Ok (match pos with (p n -> n) (end $_ -> #u)))
     |}];
   test "Z Z Z Z";
   test "iszero (pred (S (S Z)))";

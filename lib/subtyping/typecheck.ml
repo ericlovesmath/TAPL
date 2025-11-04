@@ -7,6 +7,29 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
+let rec ( <: ) (ty : ty) (ty' : ty) =
+  let is_subtype_fields r r' =
+    List.for_all r' ~f:(fun (l, ty') ->
+      match List.Assoc.find r l ~equal:String.equal with
+      | Some ty -> ty <: ty'
+      | None -> false)
+  in
+  if equal_ty ty ty'
+  then true
+  else (
+    match ty, ty' with
+    | _, TyTop -> true
+    | TyTuple ts, TyTuple ts' ->
+      (match List.for_all2 ts ts' ~f:( <: ) with
+       | Ok _ -> true
+       | Unequal_lengths -> false)
+    | TyRecord r, TyRecord r' -> is_subtype_fields r r'
+    | TyVariant v, TyVariant v' -> is_subtype_fields v v'
+    | TyArrow (a, b), TyArrow (a', b') -> a <: a' && b <: b'
+    | TyRef t, TyRef t' -> t <: t' && t' <: t
+    | _ -> false)
+;;
+
 let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
   let open Or_error.Let_syntax in
   match t with
@@ -41,19 +64,11 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
           error_s
             [%message "record missing field" (tys : (string * ty) list) (l : string)])
      | _ -> error_s [%message "expected record to project from" (t : t)])
-  | EVariant (l, ty, t) ->
-    (match ty with
-     | TyVariant tys ->
-       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
-       (match List.Assoc.find tys l ~equal:String.equal with
-        | Some ty_anno ->
-          let%bind ty_infer = type_of ctx t in
-          if equal_ty ty_infer ty_anno
-          then Ok ty
-          else error_s [%message "incorrect variant type" (ty_infer : ty) (ty_anno : ty)]
-        | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)])
-     | _ -> error_s [%message "expected annotation to be a variant" (ty : ty)])
+  | EVariant (l, t) ->
+    let%map ty = type_of ctx t in
+    TyVariant [ l, ty ]
   | EMatch (t, cases) ->
+    (* TODO: Join *)
     let%bind ty = type_of ctx t in
     (match ty with
      | TyVariant tys ->
@@ -87,10 +102,11 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
      | _ -> error_s [%message "expected match on variant" (ty : ty)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t TyUnit
+    if ty_t <: TyUnit
     then type_of ctx t'
     else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty)]
   | EIf (c, t, f) ->
+    (* TODO: Join *)
     let%bind ty_c = type_of ctx c in
     if not (equal_ty ty_c TyBool)
     then error_s [%message "[if] condition is not TyBool" (ty_c : ty)]
@@ -117,34 +133,37 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     (match ty_f with
      | TyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx x in
-       if equal_ty ty_arg ty_x
+       if ty_x <: ty_arg
        then Ok ty_body
-       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
+       else
+         error_s
+           [%message
+             "arg's type does not subsume expected input type" (ty_f : ty) (ty_arg : ty)]
      | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
-    let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t ty_annotated
-    then Ok ty_t
-    else
-      error_s
-        [%message "annotated and derived type differ" (ty_t : ty) (ty_annotated : ty)]
+    (* NOTE: Ascription does downcasting *)
+    let%map _ = type_of ctx t in
+    ty_annotated
   | EZero -> Ok TyNat
   | ESucc t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyNat
+    else error_s [%message "expected succ to take term subsumed to nat" (ty_t : ty)]
   | EPred t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyNat
+    else error_s [%message "expected pred to take term subsumed to nat" (ty_t : ty)]
   | EIsZero t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyBool
-     | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyBool
+    else error_s [%message "expected iszero to take term subsumed to nat" (ty_t : ty)]
   | EFix t ->
     (match%bind type_of ctx t with
-     | TyArrow (ty_l, ty_r) when equal_ty ty_l ty_r -> Ok ty_l
-     | ty_t -> error_s [%message "fix expects function of 'a -> 'a" (ty_t : ty)])
+     | TyArrow (ty_l, ty_r) when ty_r <: ty_l -> Ok ty_r
+     | ty_t -> error_s [%message "fix expects type a -> b where b <: a" (ty_t : ty)])
   | ERef t ->
     let%map ty = type_of ctx t in
     TyRef ty
@@ -156,9 +175,9 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     (match Map.find ctx v with
      | Some (TyRef ty_v) ->
        let%bind ty_t = type_of ctx t in
-       if equal_ty ty_v ty_t
+       if ty_t <: ty_v
        then Ok TyUnit
-       else error_s [%message "assigning to ref of wrong type" (ty_v : ty) (ty_t : ty)]
+       else error_s [%message "assign to ref of unsubsumed type" (ty_v : ty) (ty_t : ty)]
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty)]
      | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
 ;;
