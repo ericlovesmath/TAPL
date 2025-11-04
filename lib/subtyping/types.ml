@@ -3,6 +3,7 @@ open Sexplib.Sexp
 
 type ty =
   | TyTop
+  | TyBottom
   | TyBase of char
   | TyUnit
   | TyBool
@@ -43,6 +44,7 @@ type t =
 let sexp_of_ty ty =
   let rec parse = function
     | TyTop -> Atom "top"
+    | TyBottom -> Atom "bot"
     | TyBase c -> Atom (String.of_char c)
     | TyUnit -> Atom "unit"
     | TyBool -> Atom "bool"

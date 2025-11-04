@@ -1,5 +1,6 @@
 type ty =
   | TyTop
+  | TyBottom
   | TyBase of char
   | TyUnit
   | TyBool

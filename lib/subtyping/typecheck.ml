@@ -19,6 +19,7 @@ let rec ( <: ) (ty : ty) (ty' : ty) =
   else (
     match ty, ty' with
     | _, TyTop -> true
+    | TyBottom, _ -> true
     | TyTuple ts, TyTuple ts' ->
       (match List.for_all2 ts ts' ~f:( <: ) with
        | Ok true -> true
@@ -47,6 +48,8 @@ let rec join (ty : ty) (ty' : ty) =
   then ty
   else (
     match ty, ty' with
+    | TyBottom, _ -> ty'
+    | _, TyBottom -> ty
     | TyRecord r, TyRecord r' -> TyRecord (join_fields r r')
     | TyVariant v, TyVariant v' -> TyVariant (join_fields v v')
     | TyTuple ts, TyTuple ts' ->

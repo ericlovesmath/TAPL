@@ -40,6 +40,7 @@ type token =
   | REF
   | ASSIGN
   | TOP
+  | BOT
   | INT of int
   | BASE of char
   | ID of string
