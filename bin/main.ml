@@ -1,6 +1,9 @@
 open Core
 
-module Simply_typed_repl = struct
+module Make (Repl : sig
+    val repl : string -> unit
+  end) =
+struct
   (** Enables multiline inputs by waiting for [\n\n] instead *)
   let multiline = ref false
 
@@ -12,7 +15,9 @@ module Simply_typed_repl = struct
     | None -> exit 0
     | Some line ->
       if !multiline && not (String.is_empty line || Char.equal (String.get line 0) ':')
-      then line ^ "\n" ^ get_input ()
+      then (
+        print_string "... ";
+        line ^ "\n" ^ get_input ())
       else line
   ;;
 
@@ -33,7 +38,7 @@ module Simply_typed_repl = struct
        print_endline @@ "Set multiline mode to " ^ string_of_bool !multiline
      | "" -> ()
      | _ ->
-       (try Simply_typed_extended.repl input with
+       (try Repl.repl input with
         | e -> print_endline (Exn.to_string e)));
     repl ()
   ;;
@@ -44,21 +49,20 @@ module Simply_typed_repl = struct
   ;;
 end
 
+module Simply_typed_repl = Make (Simply_typed_extended)
+module Subtyping_repl = Make (Subtyping)
+
 let command =
   Command.basic
     ~summary:"Simple REPL interface"
     (let open Command.Let_syntax in
      let%map_open impl =
-       flag_optional_with_default_doc
-         "-impl"
-         string
-         Sexp.of_string
-         ~default:"simply_typed_extended"
-         ~doc:"STRING implementation to run"
+       flag "-impl" (required string) ~doc:"STRING implementation to run [simple, sub]"
      in
      fun () ->
        match impl with
-       | "simply_typed_extended" -> Simply_typed_repl.start ()
+       | "simple" -> Simply_typed_repl.start ()
+       | "sub" -> Subtyping_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 
