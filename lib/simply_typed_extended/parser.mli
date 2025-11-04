@@ -1,4 +1,5 @@
-include Chomp.Parser with type pos = Lexer.pos and type token = Lexer.token
+module Lexer : module type of Chomp.Lexer
+module Parser : Chomp.Parser with type pos = Lexer.pos and type token = Lexer.token
 
-val t_p : Types.t t
-val ty_p : Types.ty t
+val t_p : Types.t Parser.t
+val ty_p : Types.ty Parser.t

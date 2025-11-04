@@ -1,9 +1,11 @@
 open Core
 open Types
+module Lexer = Chomp.Lexer
 open Lexer
-include Chomp.Make (Lexer)
-open Let_syntax
-open Infix_syntax
+module Parser = Chomp.Make (Chomp.Lexer)
+open Parser
+open Parser.Let_syntax
+open Parser.Infix_syntax
 
 let ident_p : string t =
   satisfy_map (function
@@ -84,8 +86,8 @@ and ty_ref_p = fun st -> (tok REF *> ty_p) st
 let%expect_test "ty parse tests" =
   let test s =
     s
-    |> Lexer.of_string
-    |> Lexer.lex
+    |> Chomp.Lexer.of_string
+    |> Chomp.Lexer.lex
     |> run ty_p
     |> Or_error.sexp_of_t sexp_of_ty
     |> print_s
@@ -284,8 +286,8 @@ and t_abs_p =
 let%expect_test "t parse tests" =
   let test s =
     s
-    |> Lexer.of_string
-    |> Lexer.lex
+    |> Chomp.Lexer.of_string
+    |> Chomp.Lexer.lex
     |> run t_p
     |> Or_error.sexp_of_t sexp_of_t
     |> print_s
@@ -358,6 +360,5 @@ let%expect_test "t parse tests" =
     (Ok (fun x : bool -> x))
     |}];
   test "(v := S Z); let x = ref v in !x";
-  [%expect
-    {| (Ok ((v := (S Z)) ";" (let x = (ref v) in (! x)))) |}]
+  [%expect {| (Ok ((v := (S Z)) ";" (let x = (ref v) in (! x)))) |}]
 ;;

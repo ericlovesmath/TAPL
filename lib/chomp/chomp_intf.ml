@@ -49,6 +49,7 @@ module type Make = functor (M : Parsable) ->
 
 module type Intf = sig
   module type Parser = Parser
+  module Lexer = Lexer
 
   module Make : Make
 end

@@ -1,6 +1,8 @@
 open Core
 include Chomp_intf
 
+module Lexer = Lexer
+
 module Make (M : Parsable) : Parser with type token = M.token and type pos = M.pos =
 struct
   include M
