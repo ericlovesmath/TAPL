@@ -251,6 +251,8 @@ let%expect_test "join tests" =
   [%expect {| (ty (< none , some : bool >)) |}];
   repl "if #t then #t as bot else #t";
   [%expect {| (ty bool) |}];
+  repl "if #t then error else #t";
+  [%expect {| (ty bool) |}];
   repl
     [%string
       {|

@@ -41,6 +41,7 @@ type token =
   | ASSIGN
   | TOP
   | BOT
+  | ERROR
   | INT of int
   | BASE of char
   | ID of string

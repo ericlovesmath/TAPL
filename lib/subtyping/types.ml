@@ -40,6 +40,7 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
+  | EError
 
 let sexp_of_ty ty =
   let rec parse = function
@@ -120,6 +121,7 @@ let sexp_of_t t =
     | ERef t -> List [ Atom "ref"; parse t ]
     | EDeref t -> List [ Atom "!"; parse t ]
     | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
+    | EError -> Atom "error"
   in
   parse t
 ;;

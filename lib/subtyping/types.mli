@@ -37,4 +37,5 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
+  | EError
 [@@deriving sexp_of]
