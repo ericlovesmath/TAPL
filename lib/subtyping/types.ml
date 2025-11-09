@@ -125,3 +125,75 @@ let sexp_of_t t =
   in
   parse t
 ;;
+
+type nameless =
+  | UUnit
+  | UTrue
+  | UFalse
+  | UTuple of nameless list
+  | UProjTuple of nameless * int
+  | URecord of (string * nameless) list
+  | UProjRecord of nameless * string
+  | UVariant of string * nameless
+  | UMatch of nameless * (string * nameless) list
+  | USeq of nameless * nameless
+  | UIf of nameless * nameless * nameless
+  | UVar of int
+  | UAbs of nameless
+  | UApp of nameless * nameless
+  | UZero
+  | USucc of nameless
+  | UPred of nameless
+  | UIsZero of nameless
+  | UFix of nameless
+  | URef of nameless
+  | ULoc of int
+  | UDeref of nameless
+  | UAssign of int * nameless
+  | UError
+[@@deriving equal]
+
+let sexp_of_nameless t =
+  let rec parse = function
+    | UUnit -> Atom "#u"
+    | UTrue -> Atom "#t"
+    | UFalse -> Atom "#f"
+    | UTuple ts ->
+      List
+        ([ Atom "{" ]
+         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse ts)
+         @ [ Atom "}" ])
+    | UProjTuple (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
+    | URecord record ->
+      let sexp_of_fields fields =
+        fields
+        |> List.map ~f:(fun (l, t) -> [ Atom l; Atom ":"; parse t ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "{" ] @ sexp_of_fields record @ [ Atom "}" ])
+    | UProjRecord (t, l) -> List [ parse t; Atom "."; Atom l ]
+    | UVariant (l, t) -> List [ Atom "<"; Atom l; Atom ":"; parse t; Atom ">" ]
+    | UMatch (t, cases) ->
+      let sexp_of_case (l, t) = List [ Atom l; Atom "->"; parse t ] in
+      List ([ Atom "match"; parse t; Atom "with" ] @ List.map cases ~f:sexp_of_case)
+    | USeq (t, t') -> List [ parse t; Atom ";"; parse t' ]
+    | UIf (c, t, UUnit) -> List [ Atom "if"; parse c; Atom "then"; parse t ]
+    | UIf (c, t, f) ->
+      List [ Atom "if"; parse c; Atom "then"; parse t; Atom "else"; parse f ]
+    | UVar v -> Atom (Int.to_string v)
+    | UAbs t -> List [ Atom "abs"; Atom "."; parse t ]
+    | UApp (f, x) -> List [ parse f; parse x ]
+    | UZero -> Atom "Z"
+    | USucc t -> List [ Atom "S"; parse t ]
+    | UPred t -> List [ Atom "pred"; parse t ]
+    | UIsZero t -> List [ Atom "iszero"; parse t ]
+    | UFix t -> List [ Atom "fix"; parse t ]
+    | URef t -> List [ Atom "ref"; parse t ]
+    | ULoc i -> Atom (Int.to_string i)
+    | UDeref t -> List [ Atom "!"; parse t ]
+    | UAssign (i, t) -> List [ Atom (Int.to_string i); Atom ":="; parse t ]
+    | UError -> Atom "error"
+  in
+  parse t
+;;
