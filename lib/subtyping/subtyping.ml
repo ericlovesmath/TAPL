@@ -85,7 +85,8 @@ let%expect_test "extended typechecker tests" =
   [%expect {| ((ty (A -> A)) (result (abs . 0))) |}];
   let tup = "{ #t, (fun x : bool -> x), #f }" in
   repl tup;
-  [%expect {| ((ty ({ bool , (bool -> bool) , bool })) (result ({ #t , (abs . 0) , #f }))) |}];
+  [%expect
+    {| ((ty ({ bool , (bool -> bool) , bool })) (result ({ #t , (abs . 0) , #f }))) |}];
   repl [%string "%{tup}.0"];
   repl [%string "%{tup}.1"];
   repl [%string "%{tup}.2"];
