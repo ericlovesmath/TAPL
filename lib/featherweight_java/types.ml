@@ -1,122 +1,48 @@
 open Core
 open Sexplib.Sexp
 
-type ty =
-  | TyBase of char
-  | TyUnit
-  | TyBool
-  | TyNat
-  | TyTuple of ty list
-  | TyRecord of (string * ty) list
-  | TyVariant of (string * ty) list
-  | TyArrow of ty * ty
-  | TyRef of ty
-[@@deriving equal]
+type class_name = string [@@deriving string]
+type field = string [@@deriving string]
+type method_name = string [@@deriving string]
 
 type t =
-  | EUnit
-  | ETrue
-  | EFalse
-  | ETuple of t list
-  | EProjTuple of t * int
-  | ERecord of (string * t) list
-  | EProjRecord of t * string
-  | EVariant of string * ty * t
-  | EMatch of t * (string * string * t) list
-  | ESeq of t * t
-  | EIf of t * t * t
-  | ELet of string * t * t
-  | EVar of string
-  | EAbs of string * ty * t
-  | EApp of t * t
-  | EAs of t * ty
-  | EZero
-  | ESucc of t
-  | EPred of t
-  | EIsZero of t
-  | EFix of t
-  | ERef of t
-  | EDeref of t
-  | EAssign of string * t
+  | Var of string
+  | FieldAccesss of t * field
+  | InvokeMethod of t * method_name * t list
+  | CreateObject of class_name * t list
+  | Cast of class_name * t
 
-let sexp_of_ty ty =
-  let rec parse = function
-    | TyBase c -> Atom (String.of_char c)
-    | TyUnit -> Atom "unit"
-    | TyBool -> Atom "bool"
-    | TyNat -> Atom "nat"
-    | TyTuple tys ->
-      List
-        ([ Atom "{" ]
-         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse tys)
-         @ [ Atom "}" ])
-    | TyRecord record ->
-      let fields =
-        record
-        |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
-        |> List.intersperse ~sep:[ Atom "," ]
-        |> List.concat
-      in
-      List ([ Atom "{" ] @ fields @ [ Atom "}" ])
-    | TyVariant vs ->
-      let fields =
-        vs
-        |> List.map ~f:(function
-          | l, TyUnit -> [ Atom l ]
-          | l, ty -> [ Atom l; Atom ":"; parse ty ])
-        |> List.intersperse ~sep:[ Atom "," ]
-        |> List.concat
-      in
-      List ([ Atom "<" ] @ fields @ [ Atom ">" ])
-    | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
-    | TyRef ty -> List [ parse ty; Atom "ref" ]
-  in
-  parse ty
+type method_decl =
+  { method_name : string
+  ; fields : (class_name * field) list
+  ; return : t
+  }
+
+type class_decl =
+  { class_name : class_name
+  ; superclass_name : class_name
+  ; params : (class_name * field) list
+  ; fields_to_super : field list
+  ; methods : method_decl list
+  }
+
+type program = Program of class_decl list * t
+
+let rec to_string = function
+  | Var v -> v
+  | FieldAccesss (t, v) ->
+    let t = to_string t in
+    [%string "%{t}.%{v}"]
+  | InvokeMethod (t, m, ts) ->
+    let t = to_string t in
+    let ts = String.concat ~sep:", " (List.map ~f:to_string ts) in
+    [%string "%{t}.%{m}(%{ts})"]
+  | CreateObject (c, ts) ->
+    let ts = String.concat ~sep:", " (List.map ~f:to_string ts) in
+    [%string "new %{c}(%{ts})"]
+  | Cast (c, t) ->
+    let t = to_string t in
+    [%string "(%{c}) %{t}"]
 ;;
 
-let sexp_of_t t =
-  let rec parse =
-    let sexp_of_fields fields =
-      fields
-      |> List.map ~f:(fun (l, t) -> [ Atom l; Atom ":"; parse t ])
-      |> List.intersperse ~sep:[ Atom "," ]
-      |> List.concat
-    in
-    function
-    | EUnit -> Atom "#u"
-    | ETrue -> Atom "#t"
-    | EFalse -> Atom "#f"
-    | ETuple ts ->
-      List
-        ([ Atom "{" ]
-         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse ts)
-         @ [ Atom "}" ])
-    | EProjTuple (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
-    | ERecord record -> List ([ Atom "{" ] @ sexp_of_fields record @ [ Atom "}" ])
-    | EProjRecord (t, l) -> List [ parse t; Atom "."; Atom l ]
-    | EVariant (l, ty, t) ->
-      List [ Atom "<"; Atom l; Atom ":"; parse t; Atom ">"; Atom "as"; sexp_of_ty ty ]
-    | EMatch (t, cases) ->
-      let sexp_of_case (l, v, t) = List [ Atom l; Atom v; Atom "->"; parse t ] in
-      List ([ Atom "match"; parse t; Atom "with" ] @ List.map cases ~f:sexp_of_case)
-    | ESeq (t, t') -> List [ parse t; Atom ";"; parse t' ]
-    | EIf (c, t, EUnit) -> List [ Atom "if"; parse c; Atom "then"; parse t ]
-    | EIf (c, t, f) ->
-      List [ Atom "if"; parse c; Atom "then"; parse t; Atom "else"; parse f ]
-    | ELet (v, b, t) -> List [ Atom "let"; Atom v; Atom "="; parse b; Atom "in"; parse t ]
-    | EVar v -> Atom v
-    | EAbs (v, ty, t) ->
-      List [ Atom "fun"; Atom v; Atom ":"; sexp_of_ty ty; Atom "->"; parse t ]
-    | EApp (f, x) -> List [ parse f; parse x ]
-    | EAs (t, ty) -> List [ parse t; Atom "as"; sexp_of_ty ty ]
-    | EZero -> Atom "Z"
-    | ESucc t -> List [ Atom "S"; parse t ]
-    | EPred t -> List [ Atom "pred"; parse t ]
-    | EIsZero t -> List [ Atom "iszero"; parse t ]
-    | EFix t -> List [ Atom "fix"; parse t ]
-    | ERef t -> List [ Atom "ref"; parse t ]
-    | EDeref t -> List [ Atom "!"; parse t ]
-    | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
-  in
-  parse t
-;;
+let sexp_of_t t = Atom (to_string t)

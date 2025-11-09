@@ -2,5 +2,5 @@
  (name featherweight_java)
  (libraries core chomp)
  (preprocess
-  (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_compare ppx_string))
+  (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_string ppx_string_conv))
  (inline_tests))
