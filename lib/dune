@@ -6,5 +6,6 @@
    untyped_nameless
    simply_typed_lambda_calculus
    simply_typed_extended
-   subtyping))
+   subtyping
+   featherweight_java))
 
