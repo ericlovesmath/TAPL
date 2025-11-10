@@ -2,14 +2,15 @@ open Core
 open Types
 open Or_error.Let_syntax
 
-(* TODO: Better tests and Error Messages*)
+(* TODO: Better Error Messages *)
+(* TODO: Check for cycles *)
 
 (** Look up type of method in class, [fields -> term]  (Fig 19.2) *)
 let rec method_type (tbl : class_decl list) (m : method_name) (c : class_name) =
-  let cl = Utils.find_class tbl c in
+  let%bind cl = Utils.find_class tbl c in
   let md_opt = List.find cl.methods ~f:(fun md -> equal_method_name md.method_name m) in
   match md_opt with
-  | Some md -> List.map ~f:fst md.fields, fst md.term
+  | Some md -> return (List.map ~f:fst md.fields, fst md.term)
   | None -> method_type tbl m cl.superclass_name
 ;;
 
@@ -21,7 +22,7 @@ let rec type_of (tbl : class_decl list) (ctx : class_name String.Map.t) = functi
   | FieldAccess (t, field) ->
     (* T-Field *)
     let%bind class_name = type_of tbl ctx t in
-    let fields = Utils.fields tbl class_name in
+    let%bind fields = Utils.fields tbl class_name in
     fields
     |> List.find ~f:(Fn.compose (equal_field_name field) snd)
     |> Option.map ~f:fst
@@ -30,7 +31,7 @@ let rec type_of (tbl : class_decl list) (ctx : class_name String.Map.t) = functi
     (* T-Invk *)
     let%bind cn = type_of tbl ctx t in
     let%bind arg_cns = Or_error.all (List.map ~f:(type_of tbl ctx) args) in
-    let field_cns, ret = method_type tbl mn cn in
+    let%bind field_cns, ret = method_type tbl mn cn in
     (match List.for_all2 arg_cns field_cns ~f:(Utils.is_subtype tbl) with
      | Ok true -> return ret
      | Ok false -> Or_error.error_string "args and fields not subtyped"
@@ -38,7 +39,8 @@ let rec type_of (tbl : class_decl list) (ctx : class_name String.Map.t) = functi
   | CreateObject (class_name, args) ->
     (* T-New *)
     let%bind arg_cns = Or_error.all (List.map ~f:(type_of tbl ctx) args) in
-    let field_cns = List.map ~f:fst (Utils.fields tbl class_name) in
+    let%bind fields = Utils.fields tbl class_name in
+    let field_cns = List.map ~f:fst fields in
     (match List.for_all2 arg_cns field_cns ~f:(Utils.is_subtype tbl) with
      | Ok true -> return class_name
      | Ok false -> Or_error.error_string "args and fields not subtyped"
@@ -66,12 +68,15 @@ let override
     if Utils.is_object cn
     then None
     else (
-      let cl = Utils.find_class tbl cn in
-      match
-        List.find cl.methods ~f:(fun m -> equal_method_name m.method_name md.method_name)
-      with
-      | Some md -> Some (List.map ~f:fst md.fields, fst md.term)
-      | None -> find_super_method cl.superclass_name)
+      (* NOTE: If we can't find the class, we would have failed [typecheck_method]
+         before we even get to this point *)
+      match Utils.find_class tbl cn with
+      | Error _ -> None
+      | Ok cl ->
+        let is_method m = equal_method_name m.method_name md.method_name in
+        (match List.find cl.methods ~f:is_method with
+         | Some md -> Some (List.map ~f:fst md.fields, fst md.term)
+         | None -> find_super_method cl.superclass_name))
   in
   match find_super_method cl.superclass_name with
   | None -> true
@@ -108,92 +113,4 @@ let typecheck_class (tbl : class_decl list) (cl : class_decl) : unit Or_error.t 
 let typecheck (Program (tbl, t)) =
   let%bind () = Or_error.all_unit (List.map ~f:(typecheck_class tbl) tbl) in
   type_of tbl String.Map.empty t
-;;
-
-let preamble =
-  {|
-   class A extends Object { A() { super(); }}
-   class B extends Object { B() { super(); }}
-
-   class Pair extends Object {
-     Object fst;
-     Object snd;
-
-     Pair(Object fst, Object snd) {
-       super();
-       this.fst = fst;
-       this.snd = snd;
-     }
-
-     Pair setfst(Object newfst) {
-       return new Pair(newfst, this.snd);
-     }
-   }
-
-   class Integer extends Object {
-     Integer() { super(); }
-     Integer prev() { return this; }
-     Integer add(Integer other) { return this; }
-   }
-
-   class Zero extends Integer {
-     Zero() { super(); }
-     Integer prev() { return (Integer) this; }
-     Integer add(Integer other) { return other; }
-   }
-
-   class Succ extends Integer {
-     Integer prev;
-
-     Succ(Integer prev) {
-       super();
-       this.prev = prev;
-     }
-
-     Integer prev() { return this.prev; }
-     Integer add(Integer other) {
-       return new Succ(((Integer) this).prev().add(other));
-     }
-   }
-  |}
-;;
-
-let test s =
-  s
-  |> String.append preamble
-  |> Chomp.Lexer.of_string
-  |> Chomp.Lexer.lex
-  |> Parser.(Parser.run program_p)
-  |> Or_error.bind ~f:typecheck
-  |> Or_error.sexp_of_t sexp_of_class_name
-  |> print_s
-;;
-
-let%expect_test "featherweight java typecheck pair tests" =
-  test "new Pair(new A(), new B()).fst";
-  test "new Pair(new A(), new B()).setfst(new B())";
-  [%expect
-    {|
-    (Ok Object)
-    (Ok Pair)
-    |}];
-  test "(Object) new Pair(new A(), new B())";
-  test "(B) new Pair((B) new A(), new B())";
-  [%expect
-    {|
-    (Ok Object)
-    warning: stupid cast
-    warning: stupid cast
-    (Ok B)
-    |}]
-;;
-
-let%expect_test "featherweight java typecheck int tests" =
-  test "new Succ(new Succ(new Zero()))";
-  test "(new Succ(new Succ(new Zero()))).add(new Succ(new Succ(new Zero())))";
-  [%expect
-    {|
-    (Ok Succ)
-    (Ok Integer)
-    |}]
 ;;

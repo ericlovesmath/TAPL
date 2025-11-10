@@ -3,8 +3,8 @@ open Types
 
 (** Look up method in class (Fig 19.2) *)
 let method_body (tbl : class_decl list) (m : method_name) (c : class_name) =
-  let cl = Utils.find_class tbl c in
-  let md = Utils.find_method cl m in
+  let cl = Or_error.ok_exn (Utils.find_class tbl c) in
+  let md = Or_error.ok_exn (Utils.find_method cl m) in
   List.map md.fields ~f:snd, snd md.term
 ;;
 
@@ -36,6 +36,7 @@ let rec eval1 (tbl : class_decl list) =
   | FieldAccess ((CreateObject (class_name, args) as t), field_name) when is_value t ->
     (* E-ProjNew *)
     Utils.fields tbl class_name
+    |> Or_error.ok_exn
     |> List.map ~f:snd
     |> List.findi_exn ~f:(Fn.const (equal_field_name field_name))
     |> fst
