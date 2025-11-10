@@ -42,6 +42,12 @@ type token =
   | TOP
   | BOT
   | ERROR
+  | CLASS
+  | EXTENDS
+  | SUPER
+  | THIS
+  | NEW
+  | RETURN
   | INT of int
   | BASE of char
   | ID of string

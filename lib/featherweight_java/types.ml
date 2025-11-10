@@ -1,36 +1,20 @@
 open Core
 open Sexplib.Sexp
 
-type class_name = string [@@deriving string]
-type field = string [@@deriving string]
-type method_name = string [@@deriving string]
+type class_name = string [@@deriving string, sexp_of]
+type field_name = string [@@deriving string, sexp_of]
+type method_name = string [@@deriving string, sexp_of]
 
 type t =
   | Var of string
-  | FieldAccesss of t * field
+  | FieldAccess of t * field_name
   | InvokeMethod of t * method_name * t list
   | CreateObject of class_name * t list
   | Cast of class_name * t
 
-type method_decl =
-  { method_name : string
-  ; fields : (class_name * field) list
-  ; return : t
-  }
-
-type class_decl =
-  { class_name : class_name
-  ; superclass_name : class_name
-  ; params : (class_name * field) list
-  ; fields_to_super : field list
-  ; methods : method_decl list
-  }
-
-type program = Program of class_decl list * t
-
 let rec to_string = function
   | Var v -> v
-  | FieldAccesss (t, v) ->
+  | FieldAccess (t, v) ->
     let t = to_string t in
     [%string "%{t}.%{v}"]
   | InvokeMethod (t, m, ts) ->
@@ -46,3 +30,21 @@ let rec to_string = function
 ;;
 
 let sexp_of_t t = Atom (to_string t)
+
+type method_decl =
+  { method_name : method_name
+  ; fields : (class_name * field_name) list
+  ; term : t
+  }
+[@@deriving sexp_of]
+
+type class_decl =
+  { class_name : class_name
+  ; superclass_name : class_name
+  ; params : (class_name * field_name) list
+  ; fields_to_super : field_name list
+  ; methods : method_decl list
+  }
+[@@deriving sexp_of]
+
+type program = Program of class_decl list * t [@@deriving sexp_of]

@@ -1,27 +1,29 @@
-type class_name [@@deriving string]
-type field [@@deriving string]
-type method_name [@@deriving string]
+type class_name [@@deriving string, sexp_of]
+type field_name [@@deriving string, sexp_of]
+type method_name [@@deriving string, sexp_of]
 
 type t =
   | Var of string
-  | FieldAccesss of t * field
+  | FieldAccess of t * field_name
   | InvokeMethod of t * method_name * t list
   | CreateObject of class_name * t list
   | Cast of class_name * t
 [@@deriving to_string, sexp_of]
 
 type method_decl =
-  { method_name : string
-  ; fields : (class_name * field) list
-  ; return : t
+  { method_name : method_name
+  ; fields : (class_name * field_name) list
+  ; term : t
   }
+[@@deriving sexp_of]
 
 type class_decl =
   { class_name : class_name
   ; superclass_name : class_name
-  ; params : (class_name * field) list
-  ; fields_to_super : field list
+  ; params : (class_name * field_name) list
+  ; fields_to_super : field_name list
   ; methods : method_decl list
   }
+[@@deriving sexp_of]
 
-type program = Program of class_decl list * t
+type program = Program of class_decl list * t [@@deriving sexp_of]
