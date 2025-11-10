@@ -1,6 +1,6 @@
-type class_name [@@deriving string, sexp_of]
-type field_name [@@deriving string, sexp_of]
-type method_name [@@deriving string, sexp_of]
+type class_name [@@deriving string, sexp_of, equal]
+type field_name [@@deriving string, sexp_of, equal]
+type method_name [@@deriving string, sexp_of, equal]
 
 type t =
   | Var of string

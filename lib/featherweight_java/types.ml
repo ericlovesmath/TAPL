@@ -1,9 +1,9 @@
 open Core
 open Sexplib.Sexp
 
-type class_name = string [@@deriving string, sexp_of]
-type field_name = string [@@deriving string, sexp_of]
-type method_name = string [@@deriving string, sexp_of]
+type class_name = string [@@deriving string, sexp_of, equal]
+type field_name = string [@@deriving string, sexp_of, equal]
+type method_name = string [@@deriving string, sexp_of, equal]
 
 type t =
   | Var of string
