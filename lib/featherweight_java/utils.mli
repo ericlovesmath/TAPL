@@ -1,5 +1,7 @@
 open Types
 
+val is_object : class_name -> bool
+
 (** Lookup class by classname *)
 val find_class : class_decl list -> class_name -> class_decl
 
