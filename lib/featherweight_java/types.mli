@@ -13,7 +13,7 @@ type t =
 type method_decl =
   { method_name : method_name
   ; fields : (class_name * field_name) list
-  ; term : t
+  ; term : class_name * t
   }
 [@@deriving sexp_of]
 

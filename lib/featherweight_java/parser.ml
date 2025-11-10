@@ -72,12 +72,11 @@ let field_p =
 ;;
 
 let method_p =
-  let%bind _ = ident_p in
-  (* TODO ASSERT: ^ SHOULD BE CLASS NAME *)
+  let%bind ret = class_name_p in
   let%bind method_name = method_name_p in
   let%bind fields = parens (commas field_p) in
   let%bind term = curlies (tok RETURN *> term_p <* tok SEMI) in
-  return { method_name; fields; term }
+  return { method_name; fields; term = ret, term }
 ;;
 
 let class_decl_p =
@@ -172,8 +171,9 @@ let%expect_test "featherweight java parse method" =
   test `Method {| Class method(A x, B y, C g) { return x.one(); } |};
   [%expect
     {|
-     (Ok ((method_name method) (fields ()) (term t)))
-     (Ok ((method_name method) (fields ((A x) (B y) (C g))) (term "x.one()")))
+    (Ok ((method_name method) (fields ()) (term (Class t))))
+    (Ok
+     ((method_name method) (fields ((A x) (B y) (C g))) (term (Class "x.one()"))))
     |}]
 ;;
 
@@ -222,7 +222,7 @@ let%expect_test "featherweight java parse program" =
         (params ((Object fst) (Object snd))) (fields_to_super ())
         (methods
          (((method_name setfst) (fields ((Object newfst)))
-           (term "new Pair(newfst, this.snd)"))))))
+           (term (Pair "new Pair(newfst, this.snd)")))))))
       "new Pair(new A(), new B())"))
     |}]
 ;;
