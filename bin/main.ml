@@ -51,6 +51,7 @@ end
 
 module Simply_typed_repl = Make (Simply_typed_extended)
 module Subtyping_repl = Make (Subtyping)
+module Featherweight_java_repl = Make (Featherweight_java)
 
 let command =
   Command.basic
@@ -63,6 +64,7 @@ let command =
        match impl with
        | "simple" -> Simply_typed_repl.start ()
        | "sub" -> Subtyping_repl.start ()
+       | "fj" | "java" -> Featherweight_java_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 

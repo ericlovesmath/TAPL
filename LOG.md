@@ -86,6 +86,28 @@
 - Generic REPL implementation supporting `subtyping`
 - Makefile
 
+# Week 6
+
+- `eval` for `subtyping`, adding `error/exception` forms
+- `featherweight_java` (implementation was almost directly from the helper functions and rules in TAPL)
+
+    - Parser for FJ, does not check if constructor has exact required order or contents
+    - Tests for `term` and `class_decl` parsing
+    - Typecheck `term`
+    - Typecheck methods and class declarations
+    - Evaluation of `term` given `class_decl`s (uses subtyping!)
+    - Complete tests for typecheck/eval
+    - REPL support
+
+# Week 7
+
+- Potential TODOs:
+
+    - FJ: Better error messages in typechecker / evaluator
+    - FJ: Less tolerant parser for constructors
+    - FJ: Check for dependency cycles in subtyping
+    - FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
+
 # TODO
 
 - REPL interface for type inference and evaluation
