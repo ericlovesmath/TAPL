@@ -1,3 +1,4 @@
+module Eval = Eval
 module Typecheck = Typecheck
 module Types = Types
 

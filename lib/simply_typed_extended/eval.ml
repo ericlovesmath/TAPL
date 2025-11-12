@@ -196,6 +196,9 @@ let rec eval1 (t : nameless) : nameless Store.t =
   | UProjRecord (t, l) ->
     let%map t = eval1 t in
     UProjRecord (t, l)
+  | UVariant (v, t) when not (is_value t) ->
+    let%map t = eval1 t in
+    UVariant (v, t)
   | UTuple ts ->
     let rec step = function
       | [] -> raise NoRuleApplies
