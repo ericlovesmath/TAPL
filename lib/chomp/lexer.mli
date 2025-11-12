@@ -48,6 +48,7 @@ type token =
   | THIS
   | NEW
   | RETURN
+  | REC
   | INT of int
   | BASE of char
   | ID of string

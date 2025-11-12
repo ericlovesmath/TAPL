@@ -31,7 +31,9 @@ let rec ty_p =
   (ty_p <|> between `Paren ty_p) st
 
 and ty_atom_p =
-  fun st -> (ty_singles_p <|> ty_tuple_p <|> ty_record_p <|> ty_variant_p <|> ty_ref_p) st
+  fun st ->
+  (ty_singles_p <|> ty_tuple_p <|> ty_record_p <|> ty_variant_p <|> ty_ref_p <|> ty_rec_p)
+    st
 
 and ty_singles_p =
   satisfy_map (function
@@ -39,6 +41,7 @@ and ty_singles_p =
     | BOOL -> Some TyBool
     | NAT -> Some TyNat
     | BASE c -> Some (TyBase c)
+    | ID v -> Some (TyVar v)
     | _ -> None)
 
 and ty_tuple_p =
@@ -82,6 +85,14 @@ and ty_arrow_p =
     st
 
 and ty_ref_p = fun st -> (tok REF *> ty_p) st
+
+and ty_rec_p =
+  fun st ->
+  (let%bind v = tok REC *> ident_p in
+   let%bind ty = tok DOT *> ty_p in
+   return (TyRec (v, ty)))
+    st
+;;
 
 let%expect_test "ty parse tests" =
   let test s =
@@ -131,6 +142,12 @@ let%expect_test "ty parse tests" =
     (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
     (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
     (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
+    |}];
+  test "variable -> another";
+  test "rec x . x -> x";
+  [%expect {|
+    (Ok (variable -> another))
+    (Ok (rec x . (x -> x)))
     |}]
 ;;
 
@@ -187,8 +204,8 @@ and t_let_p =
 
 and t_letrec_p =
   fun st ->
-  (let%bind id = tok LETREC *> ident_p in
-   let%bind ty = tok COLON *> ty_p in
+  (let%bind id = tok LETREC *> tok LPAREN *> ident_p in
+   let%bind ty = tok COLON *> ty_p <* tok RPAREN in
    let%bind bind = tok EQ *> t_p in
    let%bind body = tok IN *> t_p in
    return (ELet (id, EFix (EAbs (id, ty, bind)), body)))
@@ -276,8 +293,8 @@ and t_fix_p = fun st -> (tok FIX *> t_p >>| fun t -> EFix t) st
 
 and t_abs_p =
   fun st ->
-  (let%bind id = tok FUN *> ident_p in
-   let%bind ty = tok COLON *> ty_p in
+  (let%bind id = tok FUN *> tok LPAREN *> ident_p in
+   let%bind ty = tok COLON *> ty_p <* tok RPAREN in
    let%bind t = tok ARROW *> t_p in
    return (EAbs (id, ty, t)))
     st
@@ -297,7 +314,7 @@ let%expect_test "t parse tests" =
   test "if #f then #u";
   test "if if #u then #f else #t then (if #t then #f) else #f";
   test "let x = if #f then #f   in    #t";
-  test "letrec x : bool = x in #t";
+  test "letrec (x : bool) = x in #t";
   [%expect
     {|
     (Ok #u)
@@ -351,7 +368,7 @@ let%expect_test "t parse tests" =
   test "Z Z Z Z";
   test "iszero (pred (S (S Z)))";
   test "fix (S Z)";
-  test "fun x : bool -> x";
+  test "fun (x : bool) -> x";
   [%expect
     {|
     (Ok (((Z Z) Z) Z))

@@ -11,6 +11,8 @@ type ty =
   | TyVariant of (string * ty) list
   | TyArrow of ty * ty
   | TyRef of ty
+  | TyVar of string
+  | TyRec of string * ty
 [@@deriving equal]
 
 (* Church-style simply typed lambda calculus *)
@@ -71,6 +73,8 @@ let sexp_of_ty ty =
       List ([ Atom "<" ] @ fields @ [ Atom ">" ])
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
     | TyRef ty -> List [ parse ty; Atom "ref" ]
+    | TyVar v -> Atom v
+    | TyRec (v, ty) -> List [ Atom "rec"; Atom v; Atom "."; parse ty ]
   in
   parse ty
 ;;

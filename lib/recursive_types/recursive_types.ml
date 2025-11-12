@@ -18,9 +18,9 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect {| (ty bool) |}];
   repl "if #t then #f else #f";
   [%expect {| (ty bool) |}];
-  repl "if (fun x : bool -> x) then #t else #f";
+  repl "if (fun (x : bool) -> x) then #t else #f";
   [%expect {| (ty_error ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
-  repl "if #t then #t else (fun x : bool -> x)";
+  repl "if #t then #t else (fun (x : bool) -> x)";
   [%expect
     {|
     (ty_error
@@ -28,7 +28,7 @@ let%expect_test "typechecker tests prior to extending" =
     |}];
   repl "y";
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
-  let id = "(fun x : bool -> x)" in
+  let id = "(fun (x : bool) -> x)" in
   repl id;
   [%expect {| (ty (bool -> bool)) |}];
   repl [%string "(%{id} #t)"];
@@ -41,14 +41,14 @@ let%expect_test "typechecker tests prior to extending" =
     |}];
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
-  repl "(fun x : (bool -> bool) -> x)";
+  repl "(fun (x : bool -> bool) -> x)";
   [%expect {| (ty ((bool -> bool) -> (bool -> bool))) |}]
 ;;
 
 let%expect_test "extended typechecker tests" =
   repl "#u";
   [%expect {| (ty unit) |}];
-  repl "fun x : A -> x";
+  repl "fun (x : A) -> x";
   [%expect {| (ty (A -> A)) |}];
   repl "#t; #t";
   repl "#u; #u; #f";
@@ -57,7 +57,7 @@ let%expect_test "extended typechecker tests" =
     (ty_error ("[ESeq (t, t')] expected t to be unit" (ty_t bool)))
     (ty bool)
     |}];
-  repl "(let x = #t in let f = (fun x : bool -> x) in f x)";
+  repl "(let x = #t in let f = (fun (x : bool) -> x) in f x)";
   repl "(let x = #t in let y = x in y)";
   repl "(let x = #t in let y = (#t #f) in x)";
   repl "(let y = x in let x = #t in x)";
@@ -69,8 +69,8 @@ let%expect_test "extended typechecker tests" =
     (ty_error ("var not in context" x (ctx ())))
     |}];
   repl "#t as bool";
-  repl "(fun x : bool -> x) as (bool -> bool)";
-  repl "(fun x : bool -> x) as bool";
+  repl "(fun (x : bool) -> x) as (bool -> bool)";
+  repl "(fun (x : bool) -> x) as bool";
   [%expect
     {|
     (ty bool)
@@ -79,12 +79,11 @@ let%expect_test "extended typechecker tests" =
      ("annotated and derived type differ" (ty_t (bool -> bool))
       (ty_annotated bool)))
     |}];
-  repl "(fun x : A -> x) as (A -> A)";
+  repl "(fun (x : A) -> x) as (A -> A)";
   [%expect {| (ty (A -> A)) |}];
-  let tup = "{ #t, (fun x : bool -> x), #f }" in
+  let tup = "{ #t, (fun (x : bool) -> x), #f }" in
   repl tup;
-  [%expect
-    {| (ty ({ bool , (bool -> bool) , bool })) |}];
+  [%expect {| (ty ({ bool , (bool -> bool) , bool })) |}];
   repl [%string "%{tup}.0"];
   repl [%string "%{tup}.1"];
   repl [%string "%{tup}.2"];
@@ -97,7 +96,7 @@ let%expect_test "extended typechecker tests" =
     (ty_error
      ("tuple projection on invalid index" (tys (bool (bool -> bool) bool)) (i 3)))
     |}];
-  let record = "{ one = #t, two = { nest = (fun x : bool -> x) }}" in
+  let record = "{ one = #t, two = { nest = (fun (x : bool) -> x) }}" in
   repl record;
   repl [%string "%{record}.one"];
   repl [%string "%{record}.two"];
@@ -166,8 +165,8 @@ let%expect_test "extended typechecker tests" =
     |}];
   repl
     {|
-     letrec f : (nat -> nat) =
-       fun x : nat ->
+     letrec (f : nat -> nat) =
+       fun (x : nat) ->
          if iszero x
            then Z
            else f (pred x)
@@ -182,7 +181,7 @@ let%expect_test "cool examples" =
     [%string
       {|
       let next =
-        fun w : %{weekday} ->
+        fun (w : %{weekday}) ->
           match w with
           | mon -> < tue > as %{weekday}
           | tue -> < wed > as %{weekday}
@@ -200,8 +199,8 @@ let%expect_test "addition (no closures)" =
   repl
     [%string
       {|
-      letrec add : (%{pair} -> nat) =
-        (fun xy : %{pair} ->
+      letrec (add : %{pair} -> nat) =
+        (fun (xy : %{pair}) ->
           (if (iszero (xy.x))
             then (xy.y)
             else (add ({ x = (pred (xy.x)) , y = (S (xy.y)) }))))
@@ -214,9 +213,9 @@ let%expect_test "addition (closures)" =
   repl
     [%string
       {|
-      letrec add : (nat -> nat -> nat) =
-        (fun x : nat ->
-          (fun y : nat ->
+      letrec (add : nat -> nat -> nat) =
+        (fun (x : nat) ->
+          (fun (y : nat) ->
             (if (iszero x)
               then y
               else (add (pred x) (S y)))))
@@ -228,7 +227,7 @@ let%expect_test "addition (closures)" =
 let%expect_test "ref tests" =
   repl "let x = ref Z in !x";
   [%expect {| (ty nat) |}];
-  repl "let not = ref (fun x : bool -> if x then #f else #t) in (!not) #t";
+  repl "let not = ref (fun (x : bool) -> if x then #f else #t) in (!not) #t";
   [%expect {| (ty bool) |}];
   repl "let x = ref Z in (x := S Z); !x";
   [%expect {| (ty nat) |}]

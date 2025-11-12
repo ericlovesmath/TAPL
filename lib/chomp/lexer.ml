@@ -54,6 +54,7 @@ type token =
   | THIS
   | NEW
   | RETURN
+  | REC
   | INT of int
   | BASE of char
   | ID of string
@@ -162,6 +163,7 @@ let read_lexeme t =
         | "this" -> THIS
         | "new" -> NEW
         | "return" -> RETURN
+        | "rec" -> REC
         | _ ->
             if String.length s = 1 && Char.(is_uppercase (of_string s))
             then BASE (Char.of_string s)
