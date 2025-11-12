@@ -232,3 +232,41 @@ let%expect_test "ref tests" =
   repl "let x = ref Z in (x := S Z); !x";
   [%expect {| (ty nat) |}]
 ;;
+
+let%expect_test "recursive type tests" =
+  repl "(fun (f : rec x . x -> nat) -> f f)";
+  [%expect {| (ty ((rec x . (x -> nat)) -> nat)) |}];
+  let nats = "(rec a . < nil, cons : { nat, a } >)" in
+  let nil = [%string "(< nil > as %{nats})"] in
+  let cons x y = [%string "(< cons { %{x} , %{y} } > as %{nats})"] in
+  repl (cons "S Z" nil);
+  [%expect {| (ty (rec a . (< nil , cons : ({ nat , a }) >))) |}];
+  repl
+    [%string
+      {|
+      let empty =
+        fun (xs : %{nats}) ->
+          match xs with
+          | nil -> #t
+          | cons x -> #f
+      in
+      empty %{cons "Z" (cons "S Z" nil)}
+      |}];
+  [%expect {| (ty bool) |}];
+  repl
+    [%string
+      {|
+      letrec (incr : %{nats} -> %{nats}) =
+        fun (xs : %{nats}) ->
+          match xs with
+          | nil -> %{nil}
+          | cons t -> %{cons "S (t.0)" "incr (t.1)"}
+      in
+      incr %{cons "Z" (cons "S Z" nil)}
+      |}];
+  [%expect {| (ty (rec a . (< nil , cons : ({ nat , a }) >))) |}]
+;;
+
+(* TODO: Tests generic map with higher ordered function when eval is done *)
+(* TODO: Test if having two "equal" recursive types in [if] branches are recognized as equal.
+     For example, different variables, unfolded/folded versions, etc *)

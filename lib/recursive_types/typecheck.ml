@@ -1,10 +1,60 @@
 open Core
 open Types
 
+(* TODO: Eval can just be stolen by calling [Simply_typed_extended.Eval] as long
+   as we provide a conversion function [remove_names] *)
+
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
   then Ok ()
   else error_s [%message "duplicated labels in fields" (fields : string list)]
+;;
+
+let subst (v : string) (ty : ty) (term : ty) : ty =
+  let rec aux term =
+    match term with
+    | TyUnit | TyBool | TyNat | TyBase _ -> term
+    | TyVar v' -> if String.equal v v' then ty else term
+    | TyRec (v', ty) -> if String.equal v v' then term else TyRec (v', aux ty)
+    | TyArrow (ty, ty') -> TyArrow (aux ty, aux ty')
+    | TyRef ty -> TyRef (aux ty)
+    | TyTuple tys -> TyTuple (List.map ~f:aux tys)
+    | TyVariant vs -> TyVariant (List.map vs ~f:(Tuple2.map_snd ~f:aux))
+    | TyRecord vs -> TyRecord (List.map vs ~f:(Tuple2.map_snd ~f:aux))
+  in
+  aux term
+;;
+
+let unfold (ty : ty) : ty =
+  match ty with
+  | TyRec (v, ty') -> subst v ty ty'
+  | _ -> ty
+;;
+
+let equal_ty (ty : ty) (ty' : ty) : bool =
+  let for_all2 xs xs' ~f =
+    match List.for_all2 xs xs' ~f with
+    | Ok true -> true
+    | Ok false | Unequal_lengths -> false
+  in
+  let rec aux (seen : (ty * ty) list) (ty : ty) (ty' : ty) : bool =
+    if List.exists seen ~f:(fun (ty'', ty''') -> equal_ty ty ty'' && equal_ty ty' ty''')
+    then true
+    else (
+      let aux = aux ((ty', ty) :: (ty, ty') :: seen) in
+      (* TODO: I wonder if there's a way to use GADTs nicely to make this exhaustive *)
+      match unfold ty, unfold ty' with
+      | TyUnit, TyUnit | TyBool, TyBool | TyNat, TyNat -> true
+      | TyVar v, TyVar v' -> String.equal v v'
+      | TyBase c, TyBase c' -> Char.equal c c'
+      | TyArrow (l, r), TyArrow (l', r') -> aux l l' && aux r r'
+      | TyTuple tys, TyTuple tys' -> for_all2 tys tys' ~f:aux
+      | TyVariant vs, TyVariant vs' | TyRecord vs, TyRecord vs' ->
+        for_all2 vs vs' ~f:(fun (l, ty) (l', ty') -> String.equal l l' && aux ty ty')
+      | TyRef ty, TyRef ty' -> aux ty ty'
+      | _ -> false)
+  in
+  aux [] ty ty'
 ;;
 
 let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
@@ -24,7 +74,8 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     let%bind () = assert_unique_fields (List.map ~f:fst fields) in
     Ok (TyRecord fields)
   | EProjTuple (t, i) ->
-    (match%bind type_of ctx t with
+    let%bind ty = type_of ctx t in
+    (match unfold ty with
      | TyTuple tys ->
        (match List.nth tys i with
         | Some ty -> Ok ty
@@ -42,7 +93,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
             [%message "record missing field" (tys : (string * ty) list) (l : string)])
      | _ -> error_s [%message "expected record to project from" (t : t)])
   | EVariant (l, ty, t) ->
-    (match ty with
+    (match unfold ty with
      | TyVariant tys ->
        let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
@@ -55,7 +106,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
      | _ -> error_s [%message "expected annotation to be a variant" (ty : ty)])
   | EMatch (t, cases) ->
     let%bind ty = type_of ctx t in
-    (match ty with
+    (match unfold ty with
      | TyVariant tys ->
        let case_labels = List.map ~f:(fun (l, _, _) -> l) cases in
        let%bind () = assert_unique_fields case_labels in
@@ -114,7 +165,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     TyArrow (ty_v, ty_t)
   | EApp (f, x) ->
     let%bind ty_f = type_of ctx f in
-    (match ty_f with
+    (match unfold ty_f with
      | TyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx x in
        if equal_ty ty_arg ty_x
@@ -142,7 +193,8 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
      | TyNat -> Ok TyBool
      | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
   | EFix t ->
-    (match%bind type_of ctx t with
+    let%bind ty = type_of ctx t in
+    (match unfold ty with
      | TyArrow (ty_l, ty_r) when equal_ty ty_l ty_r -> Ok ty_l
      | ty_t -> error_s [%message "fix expects function of 'a -> 'a" (ty_t : ty)])
   | ERef t ->
