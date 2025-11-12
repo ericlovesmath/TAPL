@@ -40,7 +40,7 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect
     {|
     (ty_error
-     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_arg bool)))
+     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_x (bool -> bool))))
     |}];
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
@@ -86,7 +86,8 @@ let%expect_test "extended typechecker tests" =
   [%expect {| ((ty (A -> A)) (result (abs . 0))) |}];
   let tup = "{ #t, (fun (x : bool) -> x), #f }" in
   repl tup;
-  [%expect {| ((ty ({ bool , (bool -> bool) , bool })) (result ({ #t , (abs . 0) , #f }))) |}];
+  [%expect
+    {| ((ty ({ bool , (bool -> bool) , bool })) (result ({ #t , (abs . 0) , #f }))) |}];
   repl [%string "%{tup}.0"];
   repl [%string "%{tup}.1"];
   repl [%string "%{tup}.2"];
@@ -240,11 +241,35 @@ let%expect_test "ref tests" =
 let%expect_test "recursive type tests" =
   repl "(fun (f : rec x . x -> nat) -> f f)";
   [%expect {| ((ty ((rec x . (x -> nat)) -> nat)) (result (abs . (0 0)))) |}];
+  let check_type_equal ty =
+    repl
+      [%string
+        {|
+        let test = fun (f : rec x . x -> nat) -> f f in
+        let typecheck = (test as (%{ty})) in
+        #u
+        |}]
+  in
+  check_type_equal "rec a . a -> nat";
+  check_type_equal "rec x . (x -> nat) -> nat";
+  check_type_equal "rec x . ((x -> nat) -> nat) -> nat";
+  check_type_equal "rec x . (rec x . (x -> nat) -> nat) -> nat";
+  [%expect
+    {|
+    ((ty unit) (result #u))
+    ((ty unit) (result #u))
+    ((ty unit) (result #u))
+    ((ty unit) (result #u))
+    |}]
+;;
+
+let%expect_test "inductive list tests" =
   let nats = "(rec a . < nil, cons : { nat, a } >)" in
   let nil = [%string "(< nil > as %{nats})"] in
   let cons x y = [%string "(< cons { %{x} , %{y} } > as %{nats})"] in
   repl (cons "S Z" nil);
-  [%expect {|
+  [%expect
+    {|
     ((ty (rec a . (< nil , cons : ({ nat , a }) >)))
      (result (< cons : ({ (S Z) , (< nil : #u >) }) >)))
     |}];
@@ -263,21 +288,22 @@ let%expect_test "recursive type tests" =
   repl
     [%string
       {|
-      letrec (incr : %{nats} -> %{nats}) =
-        fun (xs : %{nats}) ->
-          match xs with
-          | nil -> %{nil}
-          | cons t -> %{cons "S (t.0)" "incr (t.1)"}
+      letrec (map : (nat -> nat) -> %{nats} -> %{nats}) =
+        fun (f : nat -> nat) ->
+          fun (xs : %{nats}) ->
+            match xs with
+            | nil -> %{nil}
+            | cons t -> %{cons "f (t.0)" "map f (t.1)"}
       in
-      incr %{cons "Z" (cons "S Z" nil)}
+      let inc =
+        fun (n : nat) -> S n
+      in
+      map inc %{cons "Z" (cons "S Z" nil)}
       |}];
-  [%expect {|
+  [%expect
+    {|
     ((ty (rec a . (< nil , cons : ({ nat , a }) >)))
      (result
       (< cons : ({ (S Z) , (< cons : ({ (S (S Z)) , (< nil : #u >) }) >) }) >)))
     |}]
 ;;
-
-(* TODO: Tests generic map with higher ordered function when eval is done *)
-(* TODO: Test if having two "equal" recursive types in [if] branches are recognized as equal.
-     For example, different variables, unfolded/folded versions, etc *)

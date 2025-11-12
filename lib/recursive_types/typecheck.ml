@@ -1,9 +1,6 @@
 open Core
 open Types
 
-(* TODO: Eval can just be stolen by calling [Simply_typed_extended.Eval] as long
-   as we provide a conversion function [remove_names] *)
-
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
   then Ok ()
@@ -170,7 +167,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
        let%bind ty_x = type_of ctx x in
        if equal_ty ty_arg ty_x
        then Ok ty_body
-       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_arg : ty)]
+       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_x : ty)]
      | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
     let%bind ty_t = type_of ctx t in
