@@ -101,12 +101,34 @@
 
 # Week 7
 
+- Recursive Types!
+
+    - This was not an implementation chapter, it was a bit of a struggle
+    - Github repository with implementations did not include subtyping either :(
+
+- Parser for recursive types (mostly copied)
+- Typechecking for recursive types
+
+    - Patched bug in `simply_typed_extended` and `subtyping` where variant contents were not evaluated
+    - Add tests for recursive types (map!)
+    - Fix bug where coinduction step used wrong `equal_ty` (should use derived version)
+
+- Subtyping support
+
+    - Update tests accordingly
+    - Used `Unique_id` to generate fresh variables to join into new recursive types
+    - Add tests for subtyping in recursive types
+
+- Add Error form
+- Add REPL support
+
 - Potential TODOs:
 
     - FJ: Better error messages in typechecker / evaluator
     - FJ: Less tolerant parser for constructors
     - FJ: Check for dependency cycles in subtyping
     - FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
+    - REC: More examples and tests
 
 # TODO
 
@@ -117,3 +139,4 @@
 - Evaluator for `subtyping`, coercion semantics for runtime evaluation in `subtyping`?
 - Upload notes on TAPL to Github
 - Chapter 18/19 tests with objects
+- Web interface to quickly run examples
