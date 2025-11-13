@@ -13,7 +13,7 @@ let repl (s : string) =
      | Error ty_error -> print_s [%message (ty_error : Error.t)]
      | Ok ty ->
        let result = Eval.eval (Eval.remove_names t) in
-       print_s [%message (ty : Types.ty) (result : Simply_typed_extended.Types.nameless)])
+       print_s [%message (ty : Types.ty) (result : Subtyping.Types.nameless)])
 ;;
 
 (* NOTE: This function is only so that each [expect_test]'s results does not depend
@@ -335,6 +335,8 @@ let%expect_test "join tests" =
   [%expect {| ((ty (< none , some : bool >)) (result (< some : #t >))) |}];
   test "if #t then #t as bot else #t";
   [%expect {| ((ty bool) (result #t)) |}];
+  test "if #t then error else #t";
+  [%expect {| ((ty bool) (result error)) |}];
   test
     [%string
       {|
@@ -386,6 +388,3 @@ let%expect_test "recursive subtyping and join tests" =
      (result (abs . (if #t then (fix (abs . 0)) else (abs . (fix (abs . 0)))))))
     |}]
 ;;
-
-(* test "if #t then error else #t"; *)
-(* [%expect {| ((ty bool) (result error)) |}]; *)

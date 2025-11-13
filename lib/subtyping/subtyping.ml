@@ -1,5 +1,6 @@
 open Core
 open Parser
+module Eval = Eval
 module Types = Types
 module Typecheck = Typecheck
 

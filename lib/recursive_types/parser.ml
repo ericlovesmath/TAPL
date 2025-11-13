@@ -165,6 +165,7 @@ and t_atom_p =
   let t_singles_p =
     satisfy_map (function
       | UNIT -> Some EUnit
+      | ERROR -> Some EError
       | TRUE -> Some ETrue
       | FALSE -> Some EFalse
       | ID v -> Some (EVar v)

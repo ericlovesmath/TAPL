@@ -1,7 +1,7 @@
 open Core
 open Types
 
-type nameless = Simply_typed_extended.Types.nameless
+type nameless = Subtyping.Types.nameless
 
 let find (ctx : string list) (v : string) : int =
   let rec find' acc = function
@@ -40,8 +40,9 @@ let remove_names (t : t) : nameless =
     | ERef t -> URef (aux ctx t)
     | EDeref t -> UDeref (aux ctx t)
     | EAssign (v, t) -> UAssign (find ctx v, aux ctx t)
+    | EError -> UError
   in
   aux [] t
 ;;
 
-let eval = Simply_typed_extended.Eval.eval
+let eval = Subtyping.Eval.eval

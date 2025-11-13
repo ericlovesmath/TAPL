@@ -2,8 +2,6 @@ open Core
 open Types
 module Unique_id = Unique_id.Int ()
 
-(* TODO: EError *)
-
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
   then Ok ()
@@ -286,6 +284,7 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
        else error_s [%message "assign to ref of unsubsumed type" (ty_v : ty) (ty_t : ty)]
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty)]
      | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
+  | EError -> Ok TyBottom
 ;;
 
 let typecheck = type_of String.Map.empty

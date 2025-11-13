@@ -1,4 +1,4 @@
-open Simply_typed_extended.Types
+open Subtyping.Types
 
 (* NOTE: Assumes [t] has already been typechecked, will fail on unbound variables *)
 val remove_names : Types.t -> nameless
