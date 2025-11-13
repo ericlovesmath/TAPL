@@ -22,13 +22,10 @@ let%expect_test "typechecker tests prior to extending" =
   repl "if #t then #f else #f";
   [%expect {| ((ty bool) (result #f)) |}];
   repl "if (fun (x : bool) -> x) then #t else #f";
-  [%expect {| (ty_error ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
-  repl "if #t then #t else (fun (x : bool) -> x)";
   [%expect
-    {|
-    (ty_error
-     ("[if] branches have unequal types" (ty_t bool) (ty_f (bool -> bool))))
-    |}];
+    {| (ty_error ("[if] condition doesn't subsume to TyBool" (ty_c (bool -> bool)))) |}];
+  repl "if #t then #t else (fun (x : bool) -> x)";
+  [%expect {| ((ty top) (result #t)) |}];
   repl "y";
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
   let id = "(fun (x : bool) -> x)" in
@@ -40,7 +37,8 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect
     {|
     (ty_error
-     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_x (bool -> bool))))
+     ("arg's type does not subsume expected input type" (ty_f (bool -> bool))
+      (ty_x (bool -> bool))))
     |}];
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
@@ -78,9 +76,7 @@ let%expect_test "extended typechecker tests" =
     {|
     ((ty bool) (result #t))
     ((ty (bool -> bool)) (result (abs . 0)))
-    (ty_error
-     ("annotated and derived type differ" (ty_t (bool -> bool))
-      (ty_annotated bool)))
+    ((ty bool) (result (abs . 0)))
     |}];
   repl "(fun (x : A) -> x) as (A -> A)";
   [%expect {| ((ty (A -> A)) (result (abs . 0))) |}];
@@ -120,39 +116,34 @@ let%expect_test "extended typechecker tests" =
      ("record missing field" (tys ((one bool) (two ({ nest : (bool -> bool) }))))
       (l three)))
     |}];
-  let option = "< some : bool , none >" in
-  repl [%string "< none > as %{option}"];
-  repl [%string "< some #t > as %{option}"];
-  repl [%string "< some #t > as %{option}"];
+  repl "< none >";
+  repl "< some #t >";
   [%expect
     {|
-    ((ty (< some : bool , none >)) (result (< none : #u >)))
-    ((ty (< some : bool , none >)) (result (< some : #t >)))
-    ((ty (< some : bool , none >)) (result (< some : #t >)))
+    ((ty (< none >)) (result (< none : #u >)))
+    ((ty (< some : bool >)) (result (< some : #t >)))
     |}];
-  repl [%string "< some #u > as %{option}"];
-  repl [%string "< yes #t > as %{option}"];
-  repl [%string "< some #t > as < some : bool , some : bool >"];
-  [%expect
-    {|
-    (ty_error ("incorrect variant type" (ty_infer unit) (ty_anno bool)))
-    (ty_error ("field missing in variant" (ty (< some : bool , none >)) (l yes)))
-    (ty_error ("duplicated labels in fields" (fields (some some))))
-    |}];
-  let some_true = [%string "< some #t > as %{option}"] in
-  repl [%string "match %{some_true} with | some x -> x | none -> #t"];
-  [%expect {| ((ty bool) (result #t)) |}];
-  repl [%string "match %{some_true} with | some x -> x | none -> #u"];
-  [%expect {| (ty_error ("unequal types across branches" (ty_cases (bool unit)))) |}];
-  repl [%string "match %{some_true} with | some x -> #t"];
-  repl [%string "match %{some_true} with | some x -> #t | some x -> #t | none -> #t"];
+  repl [%string "match < some #t > with | some x -> x | none -> #t"];
   [%expect
     {|
     (ty_error
-     ("unexpected cases for variant" (case_labels (some))
-      (variant_labels (some none))))
+     ("unexpected cases for variant" (case_labels (some none))
+      (variant_labels (some))))
+    |}];
+  repl [%string "match < some #t > with | some x -> x | none -> #u"];
+  [%expect
+    {|
+    (ty_error
+     ("unexpected cases for variant" (case_labels (some none))
+      (variant_labels (some))))
+    |}];
+  repl [%string "match < some #t > with | some x -> #t"];
+  repl [%string "match < some #t > with | some x -> #t | some x -> #t | none -> #t"];
+  [%expect
+    {|
+    ((ty bool) (result #t))
     (ty_error ("duplicated labels in fields" (fields (some some none))))
-     |}];
+    |}];
   repl "Z";
   repl "S Z";
   repl "S (pred (S Z))";
@@ -166,7 +157,7 @@ let%expect_test "extended typechecker tests" =
     ((ty nat) (result (S Z)))
     ((ty bool) (result #t))
     ((ty bool) (result #t))
-    (ty_error ("expected succ to take nat" (ty_t bool)))
+    (ty_error ("expected succ to take term subsumed to nat" (ty_t bool)))
     |}];
   repl
     {|
@@ -307,3 +298,52 @@ let%expect_test "inductive list tests" =
       (< cons : ({ (S Z) , (< cons : ({ (S (S Z)) , (< nil : #u >) }) >) }) >)))
     |}]
 ;;
+
+let%expect_test "subsumption tests" =
+  repl "(fun (x : { a : nat }) -> x.a) { a = Z, b = S Z }";
+  [%expect {| ((ty nat) (result Z)) |}];
+  repl "(fun (x : top) -> x) (ref #t)";
+  [%expect {| ((ty top) (result 0)) |}];
+  repl "(fun (x : top) -> x as bool) (ref #t)";
+  [%expect {| ((ty bool) (result 0)) |}];
+  repl "(fun (r : { y : bool, x : bool }) -> { x = r.y, y = r.x }) { x = #t, y = #f }";
+  [%expect {| ((ty ({ x : bool , y : bool })) (result ({ x : #f , y : #t }))) |}];
+  repl
+    {|
+       (fun (r : ref { y : bool, x : bool }) ->
+         r := { x = (!r).y, y = (!r).x })
+       ref { x = #t, y = #f }
+       |};
+  [%expect {| ((ty unit) (result #u)) |}]
+;;
+
+let%expect_test "join tests" =
+  repl "if #t then { x = Z } else { y = #f }";
+  [%expect {| ((ty top) (result ({ x : Z }))) |}];
+  repl "if #t then { x = Z, y = #f } else { z = #f, x = S Z }";
+  [%expect {| ((ty ({ x : nat })) (result ({ x : Z , y : #f }))) |}];
+  repl "if #t then < some #t > else < none >";
+  [%expect {| ((ty (< none , some : bool >)) (result (< some : #t >))) |}];
+  repl "if #t then < some #t > else < none >";
+  [%expect {| ((ty (< none , some : bool >)) (result (< some : #t >))) |}];
+  repl "if #t then #t as bot else #t";
+  [%expect {| ((ty bool) (result #t)) |}];
+  repl
+    [%string
+      {|
+      let next =
+        fun (w : <mon, tue, wed, thu, fri>) ->
+          match w with
+          | mon -> < tue >
+          | tue -> < wed >
+          | wed -> < thu >
+          | thu -> < fri >
+          | fri -> < mon >
+       in
+       next (< thu >)
+      |}];
+  [%expect {| ((ty (< thu , mon , tue , fri , wed >)) (result (< fri : #u >))) |}]
+;;
+
+(* repl "if #t then error else #t"; *)
+(* [%expect {| ((ty bool) (result error)) |}]; *)

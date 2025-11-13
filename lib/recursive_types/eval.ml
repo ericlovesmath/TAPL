@@ -22,7 +22,7 @@ let remove_names (t : t) : nameless =
     | EProjTuple (t, i) -> UProjTuple (aux ctx t, i)
     | ERecord r -> URecord (List.map r ~f:(fun (l, t) -> l, aux ctx t))
     | EProjRecord (t, l) -> UProjRecord (aux ctx t, l)
-    | EVariant (l, _, t) -> UVariant (l, aux ctx t)
+    | EVariant (l, t) -> UVariant (l, aux ctx t)
     | EMatch (t, cases) ->
       UMatch (aux ctx t, List.map cases ~f:(fun (l, v, tcase) -> l, aux (v :: ctx) tcase))
     | ESeq (t, t') -> USeq (aux ctx t, aux ctx t')

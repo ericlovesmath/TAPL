@@ -2,6 +2,8 @@ open Core
 open Sexplib.Sexp
 
 type ty =
+  | TyTop
+  | TyBottom
   | TyBase of char
   | TyUnit
   | TyBool
@@ -24,7 +26,7 @@ type t =
   | EProjTuple of t * int
   | ERecord of (string * t) list
   | EProjRecord of t * string
-  | EVariant of string * ty * t
+  | EVariant of string * t
   | EMatch of t * (string * string * t) list
   | ESeq of t * t
   | EIf of t * t * t
@@ -44,6 +46,8 @@ type t =
 
 let sexp_of_ty ty =
   let rec parse = function
+    | TyTop -> Atom "top"
+    | TyBottom -> Atom "bot"
     | TyBase c -> Atom (String.of_char c)
     | TyUnit -> Atom "unit"
     | TyBool -> Atom "bool"
@@ -99,8 +103,7 @@ let sexp_of_t t =
     | EProjTuple (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
     | ERecord record -> List ([ Atom "{" ] @ sexp_of_fields record @ [ Atom "}" ])
     | EProjRecord (t, l) -> List [ parse t; Atom "."; Atom l ]
-    | EVariant (l, ty, t) ->
-      List [ Atom "<"; Atom l; Atom ":"; parse t; Atom ">"; Atom "as"; sexp_of_ty ty ]
+    | EVariant (l, t) -> List [ Atom "<"; Atom l; Atom ":"; parse t; Atom ">" ]
     | EMatch (t, cases) ->
       let sexp_of_case (l, v, t) = List [ Atom l; Atom v; Atom "->"; parse t ] in
       List ([ Atom "match"; parse t; Atom "with" ] @ List.map cases ~f:sexp_of_case)

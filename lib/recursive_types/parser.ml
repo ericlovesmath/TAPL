@@ -42,6 +42,8 @@ and ty_singles_p =
     | NAT -> Some TyNat
     | BASE c -> Some (TyBase c)
     | ID v -> Some (TyVar v)
+    | TOP -> Some TyTop
+    | BOT -> Some TyBottom
     | _ -> None)
 
 and ty_tuple_p =
@@ -84,7 +86,7 @@ and ty_arrow_p =
    return (TyArrow (l, r)))
     st
 
-and ty_ref_p = fun st -> (tok REF *> ty_p) st
+and ty_ref_p = fun st -> (tok REF *> ty_p >>| fun ty -> TyRef ty) st
 
 and ty_rec_p =
   fun st ->
@@ -145,7 +147,8 @@ let%expect_test "ty parse tests" =
     |}];
   test "variable -> another";
   test "rec x . x -> x";
-  [%expect {|
+  [%expect
+    {|
     (Ok (variable -> another))
     (Ok (rec x . (x -> x)))
     |}]
@@ -248,8 +251,7 @@ and t_variant_p =
      return (label, value)
    in
    let%bind label, value = between `Angle variant_p in
-   let%bind ty = tok AS *> ty_p in
-   return (EVariant (label, ty, value)))
+   return (EVariant (label, value)))
     st
 
 and t_seq_p t =
@@ -329,8 +331,8 @@ let%expect_test "t parse tests" =
   test "{ #t , #f,#t}.0";
   test "{ #t , #f,#t}.22";
   test "{ x = #t , y = v.0 }.x";
-  test "< some x > as < some : nat, none >";
-  test "< none > as < some : nat, none >";
+  test "< some x >";
+  test "< none >";
   [%expect
     {|
     (Ok ({ ({ #t , (if #t then b) }) , #f , #t }))
@@ -338,8 +340,8 @@ let%expect_test "t parse tests" =
     (Ok (({ #t , #f , #t }) . 0))
     (Ok (({ #t , #f , #t }) . 22))
     (Ok (({ x : #t , y : (v . 0) }) . x))
-    (Ok (< some : x > as (< some : nat , none >)))
-    (Ok (< none : #u > as (< some : nat , none >)))
+    (Ok (< some : x >))
+    (Ok (< none : #u >))
     |}];
   test "let x = a; b; c in #t; #f";
   test "let x = a ; b ; c in #t; #f";

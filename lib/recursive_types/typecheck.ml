@@ -1,6 +1,9 @@
 open Core
 open Types
 
+(* TODO: Write tests for subtyping specifically for recursive types *)
+(* TODO: EError *)
+
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
   then Ok ()
@@ -10,7 +13,7 @@ let assert_unique_fields fields =
 let subst (v : string) (ty : ty) (term : ty) : ty =
   let rec aux term =
     match term with
-    | TyUnit | TyBool | TyNat | TyBase _ -> term
+    | TyUnit | TyBool | TyNat | TyBase _ | TyTop | TyBottom -> term
     | TyVar v' -> if String.equal v v' then ty else term
     | TyRec (v', ty) -> if String.equal v v' then term else TyRec (v', aux ty)
     | TyArrow (ty, ty') -> TyArrow (aux ty, aux ty')
@@ -38,8 +41,7 @@ let equal_ty (ty : ty) (ty' : ty) : bool =
     if List.exists seen ~f:(fun (ty'', ty''') -> equal_ty ty ty'' && equal_ty ty' ty''')
     then true
     else (
-      let aux = aux ((ty', ty) :: (ty, ty') :: seen) in
-      (* TODO: I wonder if there's a way to use GADTs nicely to make this exhaustive *)
+      let aux = aux ((ty, ty') :: seen) in
       match unfold ty, unfold ty' with
       | TyUnit, TyUnit | TyBool, TyBool | TyNat, TyNat -> true
       | TyVar v, TyVar v' -> String.equal v v'
@@ -50,6 +52,84 @@ let equal_ty (ty : ty) (ty' : ty) : bool =
         for_all2 vs vs' ~f:(fun (l, ty) (l', ty') -> String.equal l l' && aux ty ty')
       | TyRef ty, TyRef ty' -> aux ty ty'
       | _ -> false)
+  in
+  aux [] ty ty'
+;;
+
+let ( <: ) (ty : ty) (ty' : ty) =
+  let rec aux seen ty ty' =
+    if
+      equal_ty ty ty'
+      || List.exists seen ~f:(fun (ty'', ty''') -> equal_ty ty ty'' && equal_ty ty' ty''')
+    then true
+    else (
+      let ( <: ) = aux ((ty, ty') :: seen) in
+      let is_subtype_fields r r' =
+        List.for_all r' ~f:(fun (l, ty_field') ->
+          match List.Assoc.find r l ~equal:String.equal with
+          | Some ty_field -> ty_field <: ty_field'
+          | None -> false)
+      in
+      match unfold ty, unfold ty' with
+      | _, TyTop -> true
+      | TyBottom, _ -> true
+      | TyTuple ts, TyTuple ts' ->
+        (match List.for_all2 ts ts' ~f:( <: ) with
+         | Ok true -> true
+         | Ok false | Unequal_lengths -> false)
+      | TyRecord r, TyRecord r' -> is_subtype_fields r r'
+      | TyVariant v, TyVariant v' ->
+        (* NOTE: The switch of [v] and [v'] is intentional *)
+        is_subtype_fields v' v
+      | TyArrow (a, b), TyArrow (a', b') -> a <: a' && b <: b'
+      | TyRef t, TyRef t' -> t <: t' && t' <: t
+      | _ -> false)
+  in
+  aux [] ty ty'
+;;
+
+let join (ty : ty) (ty' : ty) =
+  let rec aux seen ty ty' =
+    if ty <: ty'
+    then ty'
+    else if ty' <: ty
+    then ty
+    else if
+      List.exists seen ~f:(fun (ty'', ty''') ->
+        (equal_ty ty ty'' && equal_ty ty' ty''')
+        || (equal_ty ty ty''' && equal_ty ty' ty''))
+    then TyTop
+    else (
+      let join = aux ((ty, ty') :: seen) in
+      match unfold ty, unfold ty' with
+      | TyBottom, _ -> ty'
+      | _, TyBottom -> ty
+      | TyRecord r, TyRecord r' ->
+        let r'' =
+          List.filter_map r' ~f:(fun (l, ty) ->
+            let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
+            l, join ty ty')
+        in
+        if List.is_empty r'' then TyTop else TyRecord r''
+      | TyVariant v, TyVariant v' ->
+        let rec join_fields r r' =
+          match r' with
+          | [] -> r
+          | (l, ty) :: tl ->
+            (match List.Assoc.find r l ~equal:String.equal with
+             | None -> join_fields ((l, ty) :: r) tl
+             | Some ty' ->
+               let ty'' = List.Assoc.add r l (join ty ty') ~equal:String.equal in
+               join_fields ty'' tl)
+        in
+        TyVariant (join_fields v v')
+      | TyTuple ts, TyTuple ts' ->
+        (match List.map2 ts ts' ~f:join with
+         | Ok ts'' -> TyTuple ts''
+         | Unequal_lengths -> TyTop)
+      | TyArrow (a, b), TyArrow (a', b') -> TyArrow (join a a', join b b')
+      | TyRef t, TyRef t' -> if equal_ty t t' then TyRef t else TyTop
+      | _ -> TyTop)
   in
   aux [] ty ty'
 ;;
@@ -80,7 +160,8 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
           error_s [%message "tuple projection on invalid index" (tys : ty list) (i : int)])
      | _ -> error_s [%message "expected tuple to project from" (t : t)])
   | EProjRecord (t, l) ->
-    (match%bind type_of ctx t with
+    let%bind ty = type_of ctx t in
+    (match unfold ty with
      | TyRecord tys ->
        let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
@@ -89,18 +170,9 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
           error_s
             [%message "record missing field" (tys : (string * ty) list) (l : string)])
      | _ -> error_s [%message "expected record to project from" (t : t)])
-  | EVariant (l, ty, t) ->
-    (match unfold ty with
-     | TyVariant tys ->
-       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
-       (match List.Assoc.find tys l ~equal:String.equal with
-        | Some ty_anno ->
-          let%bind ty_infer = type_of ctx t in
-          if equal_ty ty_infer ty_anno
-          then Ok ty
-          else error_s [%message "incorrect variant type" (ty_infer : ty) (ty_anno : ty)]
-        | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)])
-     | _ -> error_s [%message "expected annotation to be a variant" (ty : ty)])
+  | EVariant (l, t) ->
+    let%map ty = type_of ctx t in
+    TyVariant [ l, ty ]
   | EMatch (t, cases) ->
     let%bind ty = type_of ctx t in
     (match unfold ty with
@@ -125,29 +197,23 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
            type_of ctx t
          | None -> error_s [%message "field missing in variant" (ty : ty) (l : string)]
        in
-       let%bind ty_cases = Or_error.all (List.map ~f:ty_of_case cases) in
-       (match ty_cases with
+       (match%bind Or_error.all (List.map ~f:ty_of_case cases) with
         | [] -> error_s (Atom "case statement needs to have at least one branch")
-        | hd :: tl ->
-          if List.for_all tl ~f:(equal_ty hd)
-          then Ok hd
-          else error_s [%message "unequal types across branches" (ty_cases : ty list)])
+        | hd :: tl -> Ok (List.fold_right tl ~f:join ~init:hd))
      | _ -> error_s [%message "expected match on variant" (ty : ty)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t TyUnit
+    if ty_t <: TyUnit
     then type_of ctx t'
     else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty)]
   | EIf (c, t, f) ->
     let%bind ty_c = type_of ctx c in
-    if not (equal_ty ty_c TyBool)
-    then error_s [%message "[if] condition is not TyBool" (ty_c : ty)]
+    if not (ty_c <: TyBool)
+    then error_s [%message "[if] condition doesn't subsume to TyBool" (ty_c : ty)]
     else (
       let%bind ty_t = type_of ctx t in
       let%bind ty_f = type_of ctx f in
-      if not (equal_ty ty_t ty_f)
-      then error_s [%message "[if] branches have unequal types" (ty_t : ty) (ty_f : ty)]
-      else Ok ty_t)
+      Ok (join ty_t ty_f))
   | ELet (v, b, t) ->
     let%bind ty_b = type_of ctx b in
     let ctx = Map.set ctx ~key:v ~data:ty_b in
@@ -165,49 +231,52 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     (match unfold ty_f with
      | TyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx x in
-       if equal_ty ty_arg ty_x
+       if ty_x <: ty_arg
        then Ok ty_body
-       else error_s [%message "arg can't be applied to func" (ty_f : ty) (ty_x : ty)]
+       else
+         error_s
+           [%message
+             "arg's type does not subsume expected input type" (ty_f : ty) (ty_x : ty)]
      | _ -> error_s [%message "attempting to apply to non-arrow type" (ty_f : ty)])
   | EAs (t, ty_annotated) ->
-    let%bind ty_t = type_of ctx t in
-    if equal_ty ty_t ty_annotated
-    then Ok ty_t
-    else
-      error_s
-        [%message "annotated and derived type differ" (ty_t : ty) (ty_annotated : ty)]
+    (* NOTE: Ascription does downcasting *)
+    let%map _ = type_of ctx t in
+    ty_annotated
   | EZero -> Ok TyNat
   | ESucc t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyNat
+    else error_s [%message "expected succ to take term subsumed to nat" (ty_t : ty)]
   | EPred t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyNat
-     | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyNat
+    else error_s [%message "expected pred to take term subsumed to nat" (ty_t : ty)]
   | EIsZero t ->
-    (match%bind type_of ctx t with
-     | TyNat -> Ok TyBool
-     | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
+    let%bind ty_t = type_of ctx t in
+    if ty_t <: TyNat
+    then Ok TyBool
+    else error_s [%message "expected iszero to take term subsumed to nat" (ty_t : ty)]
   | EFix t ->
-    let%bind ty = type_of ctx t in
-    (match unfold ty with
-     | TyArrow (ty_l, ty_r) when equal_ty ty_l ty_r -> Ok ty_l
-     | ty_t -> error_s [%message "fix expects function of 'a -> 'a" (ty_t : ty)])
+    (match%bind type_of ctx t with
+     | TyArrow (ty_l, ty_r) when ty_r <: ty_l -> Ok ty_r
+     | ty_t -> error_s [%message "fix expects type a -> b where b <: a" (ty_t : ty)])
   | ERef t ->
     let%map ty = type_of ctx t in
     TyRef ty
   | EDeref t ->
-    (match%bind type_of ctx t with
+    let%bind ty = type_of ctx t in
+    (match unfold ty with
      | TyRef ty -> Ok ty
      | ty -> error_s [%message "deref expects ref" (ty : ty)])
   | EAssign (v, t) ->
     (match Map.find ctx v with
      | Some (TyRef ty_v) ->
        let%bind ty_t = type_of ctx t in
-       if equal_ty ty_v ty_t
+       if ty_t <: ty_v
        then Ok TyUnit
-       else error_s [%message "assigning to ref of wrong type" (ty_v : ty) (ty_t : ty)]
+       else error_s [%message "assign to ref of unsubsumed type" (ty_v : ty) (ty_t : ty)]
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty)]
      | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
 ;;

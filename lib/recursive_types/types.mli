@@ -1,4 +1,6 @@
 type ty =
+  | TyTop
+  | TyBottom
   | TyBase of char
   | TyUnit
   | TyBool
@@ -21,7 +23,7 @@ type t =
   | EProjTuple of t * int
   | ERecord of (string * t) list
   | EProjRecord of t * string
-  | EVariant of string * ty * t
+  | EVariant of string * t
   | EMatch of t * (string * string * t) list
   | ESeq of t * t
   | EIf of t * t * t
