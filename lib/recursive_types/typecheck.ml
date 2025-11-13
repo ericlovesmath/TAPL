@@ -1,15 +1,8 @@
 open Core
 open Types
+module Unique_id = Unique_id.Int ()
 
 (* TODO: EError *)
-
-(* TODO: Tests for this are nondeterministic *)
-let fresh_var =
-  let counter = ref 0 in
-  fun () ->
-    incr counter;
-    "v" ^ Int.to_string !counter
-;;
 
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
@@ -111,7 +104,7 @@ let join (ty : ty) (ty' : ty) =
       let join = aux ((ty, ty') :: seen) in
       match ty, ty' with
       | TyRec (v, t), TyRec (v', t') ->
-        let fresh = fresh_var () in
+        let fresh = "v" ^ Unique_id.(to_string (create ())) in
         let new_body = join (subst v (TyVar fresh) t) (subst v' (TyVar fresh) t') in
         TyRec (fresh, new_body)
       | _ ->
