@@ -345,5 +345,39 @@ let%expect_test "join tests" =
   [%expect {| ((ty (< thu , mon , tue , fri , wed >)) (result (< fri : #u >))) |}]
 ;;
 
+let%expect_test "recursive join tests" =
+  repl
+    {|
+    fun (x : unit) ->
+      if #t
+        then (fix (fun (s : rec a . { head : nat, tail : a, val : nat }) -> s))
+        else (fix (fun (s : rec b . { head : nat, tail : b, info : bool }) -> s))
+    |};
+  [%expect
+    {|
+    ((ty (unit -> (rec v1 . ({ head : nat , tail : v1 }))))
+     (result (abs . (if #t then (fix (abs . 0)) else (fix (abs . 0))))))
+    |}];
+  repl
+    {|
+    if #f
+      then (< a Z > as rec v . < a : nat, c : v >)
+      else (< b #t > as rec v . < b : bool, c : v >)
+    |};
+  [%expect {| ((ty (rec v2 . (< c : v2 , b : bool , a : nat >))) (result (< b : #t >))) |}];
+  repl
+    {|
+    fun (x : unit) ->
+      if #t
+        then (fix (fun (f : rec a . nat -> a) -> f))
+        else (fun (x : nat) -> (fix (fun (f : rec a . nat -> a) -> f)))
+    |};
+  [%expect
+    {|
+    ((ty (unit -> (nat -> (rec a . (nat -> a)))))
+     (result (abs . (if #t then (fix (abs . 0)) else (abs . (fix (abs . 0)))))))
+    |}]
+;;
+
 (* repl "if #t then error else #t"; *)
 (* [%expect {| ((ty bool) (result error)) |}]; *)

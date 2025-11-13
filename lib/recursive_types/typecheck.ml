@@ -1,8 +1,15 @@
 open Core
 open Types
 
-(* TODO: Write tests for subtyping specifically for recursive types *)
 (* TODO: EError *)
+
+(* TODO: Tests for this are nondeterministic *)
+let fresh_var =
+  let counter = ref 0 in
+  fun () ->
+    incr counter;
+    "v" ^ Int.to_string !counter
+;;
 
 let assert_unique_fields fields =
   if Set.length (String.Set.of_list fields) = List.length fields
@@ -31,6 +38,12 @@ let unfold (ty : ty) : ty =
   | _ -> ty
 ;;
 
+let has_seen seen ty ty' =
+  (* NOTE: This is the equal_ty from [@@deriving compare], not the one below *)
+  let ( = ) = equal_ty in
+  List.exists seen ~f:(fun (t1, t2) -> (ty = t1 && ty' = t2) || (ty = t2 && ty' = t1))
+;;
+
 let equal_ty (ty : ty) (ty' : ty) : bool =
   let for_all2 xs xs' ~f =
     match List.for_all2 xs xs' ~f with
@@ -38,7 +51,7 @@ let equal_ty (ty : ty) (ty' : ty) : bool =
     | Ok false | Unequal_lengths -> false
   in
   let rec aux (seen : (ty * ty) list) (ty : ty) (ty' : ty) : bool =
-    if List.exists seen ~f:(fun (ty'', ty''') -> equal_ty ty ty'' && equal_ty ty' ty''')
+    if has_seen seen ty ty'
     then true
     else (
       let aux = aux ((ty, ty') :: seen) in
@@ -58,9 +71,7 @@ let equal_ty (ty : ty) (ty' : ty) : bool =
 
 let ( <: ) (ty : ty) (ty' : ty) =
   let rec aux seen ty ty' =
-    if
-      equal_ty ty ty'
-      || List.exists seen ~f:(fun (ty'', ty''') -> equal_ty ty ty'' && equal_ty ty' ty''')
+    if equal_ty ty ty' || has_seen seen ty ty'
     then true
     else (
       let ( <: ) = aux ((ty, ty') :: seen) in
@@ -94,42 +105,45 @@ let join (ty : ty) (ty' : ty) =
     then ty'
     else if ty' <: ty
     then ty
-    else if
-      List.exists seen ~f:(fun (ty'', ty''') ->
-        (equal_ty ty ty'' && equal_ty ty' ty''')
-        || (equal_ty ty ty''' && equal_ty ty' ty''))
+    else if has_seen seen ty ty'
     then TyTop
     else (
       let join = aux ((ty, ty') :: seen) in
-      match unfold ty, unfold ty' with
-      | TyBottom, _ -> ty'
-      | _, TyBottom -> ty
-      | TyRecord r, TyRecord r' ->
-        let r'' =
-          List.filter_map r' ~f:(fun (l, ty) ->
-            let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
-            l, join ty ty')
-        in
-        if List.is_empty r'' then TyTop else TyRecord r''
-      | TyVariant v, TyVariant v' ->
-        let rec join_fields r r' =
-          match r' with
-          | [] -> r
-          | (l, ty) :: tl ->
-            (match List.Assoc.find r l ~equal:String.equal with
-             | None -> join_fields ((l, ty) :: r) tl
-             | Some ty' ->
-               let ty'' = List.Assoc.add r l (join ty ty') ~equal:String.equal in
-               join_fields ty'' tl)
-        in
-        TyVariant (join_fields v v')
-      | TyTuple ts, TyTuple ts' ->
-        (match List.map2 ts ts' ~f:join with
-         | Ok ts'' -> TyTuple ts''
-         | Unequal_lengths -> TyTop)
-      | TyArrow (a, b), TyArrow (a', b') -> TyArrow (join a a', join b b')
-      | TyRef t, TyRef t' -> if equal_ty t t' then TyRef t else TyTop
-      | _ -> TyTop)
+      match ty, ty' with
+      | TyRec (v, t), TyRec (v', t') ->
+        let fresh = fresh_var () in
+        let new_body = join (subst v (TyVar fresh) t) (subst v' (TyVar fresh) t') in
+        TyRec (fresh, new_body)
+      | _ ->
+        (match unfold ty, unfold ty' with
+         | TyBottom, _ -> ty'
+         | _, TyBottom -> ty
+         | TyRecord r, TyRecord r' ->
+           let r'' =
+             List.filter_map r' ~f:(fun (l, ty) ->
+               let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
+               l, join ty ty')
+           in
+           if List.is_empty r'' then TyTop else TyRecord r''
+         | TyVariant v, TyVariant v' ->
+           let rec join_fields r r' =
+             match r' with
+             | [] -> r
+             | (l, ty) :: tl ->
+               (match List.Assoc.find r l ~equal:String.equal with
+                | None -> join_fields ((l, ty) :: r) tl
+                | Some ty' ->
+                  let ty'' = List.Assoc.add r l (join ty ty') ~equal:String.equal in
+                  join_fields ty'' tl)
+           in
+           TyVariant (join_fields v v')
+         | TyTuple ts, TyTuple ts' ->
+           (match List.map2 ts ts' ~f:join with
+            | Ok ts'' -> TyTuple ts''
+            | Unequal_lengths -> TyTop)
+         | TyArrow (a, b), TyArrow (a', b') -> TyArrow (join a a', join b b')
+         | TyRef t, TyRef t' -> if equal_ty t t' then TyRef t else TyTop
+         | _ -> TyTop))
   in
   aux [] ty ty'
 ;;
