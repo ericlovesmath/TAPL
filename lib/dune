@@ -8,5 +8,6 @@
    simply_typed_extended
    subtyping
    featherweight_java
-   recursive_types))
+   recursive_types
+   hindley_milner))
 

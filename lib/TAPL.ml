@@ -7,3 +7,4 @@ module Simply_typed_extended = Simply_typed_extended
 module Subtyping = Subtyping
 module Featherweight_java = Featherweight_java
 module Recursive_types = Recursive_types
+module Hindley_milner = Hindley_milner

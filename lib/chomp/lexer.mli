@@ -49,6 +49,7 @@ type token =
   | NEW
   | RETURN
   | REC
+  | TICK
   | INT of int
   | BASE of char
   | ID of string

@@ -55,6 +55,7 @@ type token =
   | NEW
   | RETURN
   | REC
+  | TICK
   | INT of int
   | BASE of char
   | ID of string
@@ -123,6 +124,7 @@ let read_lexeme t =
     | '.' -> skip t; DOT
     | '|' -> skip t; BAR
     | '!' -> skip t; BANG
+    | '\'' -> skip t; TICK
     | '#' -> (
         skip t;
         match next t with
@@ -133,7 +135,7 @@ let read_lexeme t =
     | c when Char.is_digit c ->
         INT (Int.of_string (read_while Char.is_digit t))
     | c when Char.is_alpha c -> (
-        let s = read_while (fun c -> Char.is_alpha c) t in
+        let s = read_while Char.is_alpha t in
         match s with
         | "unit" -> UNITTY
         | "Z" -> ZERO
