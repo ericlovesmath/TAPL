@@ -9,7 +9,6 @@ type constraints = (ty * ty) list [@@deriving sexp_of]
 let gensym () = "v" ^ Unique_id.(to_string (create ()))
 
 (* TODO: More careful consideration of free type variables *)
-(* TODO: Write [simplify_tyvars] to rename them to nicer letters *)
 
 let rec constraints (ctx : ty String.Map.t) (t : t) : (ty * constraints) Or_error.t =
   match t with
@@ -75,8 +74,41 @@ let rec unify (con : constraints) : substitution Or_error.t =
   | (TyArrow (f, x), TyArrow (f', x')) :: con -> unify ((f, f') :: (x, x') :: con)
 ;;
 
+(** Renames type variables to OCaml-like naming, assumes no free tyvars.
+    Should never fail on all inputs. *)
+let rename_tyvars (ty : ty) : ty =
+  let counter = ref 0 in
+  let gensym () =
+    let i = !counter in
+    incr counter;
+    let char_code = Char.to_int 'a' + (i mod 26) in
+    let num_suffix = i / 26 in
+    let base_name = String.of_char (Char.of_int_exn char_code) in
+    if num_suffix = 0 then base_name else base_name ^ Int.to_string num_suffix
+  in
+  let rec collect_vars set = function
+    | TyVar v -> Set.add set v
+    | TyUnit | TyBool | TyNat -> set
+    | TyArrow (ty, ty') -> collect_vars (collect_vars set ty) ty'
+  in
+  let substitution_map =
+    ty
+    |> collect_vars String.Set.empty
+    |> Set.to_list
+    |> List.map ~f:(fun v -> v, gensym ())
+    |> String.Map.of_alist_exn
+  in
+  let rec rename = function
+    | TyVar v -> TyVar (Map.find_exn substitution_map v)
+    | TyArrow (ty, ty') -> TyArrow (rename ty, rename ty')
+    | (TyUnit | TyBool | TyNat) as ty -> ty
+  in
+  rename ty
+;;
+
 let typecheck t =
   let%bind ty_s, con = constraints String.Map.empty t in
   let%bind sub = unify con in
-  return (apply_to_ty sub ty_s)
+  let ty = apply_to_ty sub ty_s in
+  Or_error.try_with (fun () -> rename_tyvars ty)
 ;;
