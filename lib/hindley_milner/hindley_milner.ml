@@ -13,7 +13,7 @@ let repl (s : string) =
      | Ok ty -> print_s (Types.sexp_of_ty ty))
 ;;
 
-let%expect_test "typechecker tests" =
+let%expect_test "basic constraint polymorphism" =
   repl "#u";
   repl "#t";
   repl "#f";
@@ -36,5 +36,20 @@ let%expect_test "typechecker tests" =
     (nat -> nat)
     (('a -> 'b) -> ('a -> 'b))
     (bool -> ((bool -> nat) -> nat))
+    |}]
+;;
+
+let%expect_test "let polymorphism tests" =
+  repl "let f = fun x -> x in f Z";
+  repl
+    {|
+    let f = fun x -> x in
+    let g = f Z in
+    f
+    |};
+  [%expect
+    {|
+    nat
+    ('a -> 'a)
     |}]
 ;;

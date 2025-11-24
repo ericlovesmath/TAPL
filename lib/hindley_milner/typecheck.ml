@@ -4,13 +4,79 @@ open Or_error.Let_syntax
 module Unique_id = Unique_id.Int ()
 
 type substitution = (string * ty) list [@@deriving sexp_of]
+
+(** List of equality constraints on types *)
 type constraints = (ty * ty) list [@@deriving sexp_of]
+
+(** forall x1 x2 ... . t1 *)
+type type_scheme = string list * ty [@@deriving sexp_of]
+
+type context = type_scheme String.Map.t
 
 let gensym () = "v" ^ Unique_id.(to_string (create ()))
 
-(* TODO: More careful consideration of free type variables *)
+let apply_to_ty (sub : substitution) (ty : ty) : ty =
+  let rec aux (ty : ty) =
+    match ty with
+    | TyVar v -> List.Assoc.find ~equal:String.equal sub v |> Option.value ~default:ty
+    | TyUnit | TyBool | TyNat -> ty
+    | TyArrow (f, x) -> TyArrow (aux f, aux x)
+  in
+  aux ty
+;;
 
-let rec constraints (ctx : ty String.Map.t) (t : t) : (ty * constraints) Or_error.t =
+let apply_to_context (sub : substitution) (ctx : context) : type_scheme String.Map.t =
+  Map.map ctx ~f:(fun (vars, ty) ->
+    let sub' = List.filter sub ~f:(fun (v, _) -> List.mem vars v ~equal:String.( <> )) in
+    vars, apply_to_ty sub' ty)
+;;
+
+let apply_to_constraints (sub : substitution) (con : constraints) : constraints =
+  List.map con ~f:(fun (l, r) -> apply_to_ty sub l, apply_to_ty sub r)
+;;
+
+(** Generalize a type by quantifying over all type variables not free in the context *)
+let generalize (ctx : context) (ty : ty) : type_scheme =
+  let rec ftv_of_ty = function
+    | TyVar v -> String.Set.singleton v
+    | TyUnit | TyBool | TyNat -> String.Set.empty
+    | TyArrow (t1, t2) -> Set.union (ftv_of_ty t1) (ftv_of_ty t2)
+  in
+  let ftv_of_scheme scheme =
+    let vars, ty = scheme in
+    Set.diff (ftv_of_ty ty) (String.Set.of_list vars)
+  in
+  let ftv_of_context (ctx : context) : String.Set.t =
+    Map.data ctx |> List.map ~f:ftv_of_scheme |> String.Set.union_list
+  in
+  Set.to_list (Set.diff (ftv_of_ty ty) (ftv_of_context ctx)), ty
+;;
+
+let rec unify (con : constraints) : substitution Or_error.t =
+  match con with
+  | [] -> return []
+  | (TyVar v, ty) :: con | (ty, TyVar v) :: con ->
+    let rec has_infinite_type = function
+      | TyVar v' -> String.equal v v'
+      | TyUnit | TyBool | TyNat -> false
+      | TyArrow (ty, ty') -> has_infinite_type ty || has_infinite_type ty'
+    in
+    if has_infinite_type ty
+    then error_s [%message "unify: recursive unification" (v : string) (ty : ty)]
+    else if equal_ty (TyVar v) ty
+    then unify con
+    else (
+      let%map sub = unify (apply_to_constraints [ v, ty ] con) in
+      (v, ty) :: sub)
+  | (((TyNat | TyUnit | TyBool) as ty), ty') :: con
+  | (ty, ((TyNat | TyUnit | TyBool) as ty')) :: con ->
+    if equal_ty ty ty'
+    then unify con
+    else error_s [%message "unify: invalid equality constraint" (ty : ty) (ty' : ty)]
+  | (TyArrow (f, x), TyArrow (f', x')) :: con -> unify ((f, f') :: (x, x') :: con)
+;;
+
+let rec constraints (ctx : context) (t : t) : (ty * constraints) Or_error.t =
   match t with
   | EUnit -> return (TyUnit, [])
   | ETrue | EFalse -> return (TyBool, [])
@@ -21,11 +87,13 @@ let rec constraints (ctx : ty String.Map.t) (t : t) : (ty * constraints) Or_erro
     let con = ((ty_c, TyBool) :: (ty_t, ty_f) :: con_c) @ con_t @ con_f in
     return (ty_t, con)
   | EVar v ->
-    let%map ty = Map.find_or_error ctx v in
-    ty, []
+    let%map vars, ty = Map.find_or_error ctx v in
+    (* instantiating new type variables *)
+    let sub = List.map vars ~f:(fun v -> v, TyVar (gensym ())) in
+    apply_to_ty sub ty, []
   | EAbs (v, t) ->
     let ty_var = TyVar (gensym ()) in
-    let ctx = Map.set ctx ~key:v ~data:ty_var in
+    let ctx = Map.set ctx ~key:v ~data:([], ty_var) in
     let%map ty_t, con = constraints ctx t in
     TyArrow (ty_var, ty_t), con
   | EApp (f, x) ->
@@ -40,38 +108,14 @@ let rec constraints (ctx : ty String.Map.t) (t : t) : (ty * constraints) Or_erro
   | EIsZero t ->
     let%map ty, con = constraints ctx t in
     TyBool, (ty, TyNat) :: con
-  | ELet (_, _, _) -> failwith "TODO Let Constraints"
-;;
-
-let apply_to_ty (sub : substitution) (ty : ty) : ty =
-  let rec aux (ty : ty) =
-    match ty with
-    | TyVar v -> List.Assoc.find ~equal:String.equal sub v |> Option.value ~default:ty
-    | TyUnit | TyBool | TyNat -> ty
-    | TyArrow (f, x) -> TyArrow (aux f, aux x)
-  in
-  aux ty
-;;
-
-let apply_to_constraints (sub : substitution) (con : constraints) : constraints =
-  List.map con ~f:(fun (l, r) -> apply_to_ty sub l, apply_to_ty sub r)
-;;
-
-let rec unify (con : constraints) : substitution Or_error.t =
-  match con with
-  | [] -> return []
-  | (TyVar v, ty) :: con | (ty, TyVar v) :: con ->
-    if equal_ty (TyVar v) ty
-    then unify con
-    else (
-      let%map sub = unify (apply_to_constraints [ v, ty ] con) in
-      (v, ty) :: sub)
-  | (((TyNat | TyUnit | TyBool) as ty), ty') :: con
-  | (ty, ((TyNat | TyUnit | TyBool) as ty')) :: con ->
-    if equal_ty ty ty'
-    then unify con
-    else error_s [%message "unify: invalid equality constraint" (ty : ty) (ty' : ty)]
-  | (TyArrow (f, x), TyArrow (f', x')) :: con -> unify ((f, f') :: (x, x') :: con)
+  | ELet (v, b, t) ->
+    let%bind ty_bind, con_bind = constraints ctx b in
+    let%bind sub_bind = unify con_bind in
+    let ty_bind = apply_to_ty sub_bind ty_bind in
+    let ctx = apply_to_context sub_bind ctx in
+    let scheme = generalize ctx ty_bind in
+    let ctx = Map.set ctx ~key:v ~data:scheme in
+    constraints ctx t
 ;;
 
 (** Renames type variables to OCaml-like naming, assumes no free tyvars.
