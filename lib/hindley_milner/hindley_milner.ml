@@ -13,8 +13,30 @@ let repl (s : string) =
      | Ok ty -> print_s (Types.sexp_of_ty ty))
 ;;
 
+let test s =
+  Typecheck.Unique_id.For_testing.reset_counter ();
+  repl s
+
 let%expect_test "typechecker tests" =
-  repl "#t";
-  [%expect {| bool |}];
-  repl "if #t then #f else #f";
-  [%expect {| bool |}];
+  test "#u";
+  test "#t";
+  test "#f";
+  test "if #t then #f else #f";
+  test "fun x -> x";
+  test "fun x -> fun y -> x";
+  test "fun x -> S x";
+  test "fun f -> fun x -> f x";
+  test "fun x -> fun y -> if x then y else Z";
+  [%expect
+    {|
+    unit
+    bool
+    bool
+    bool
+    ('v0 -> 'v0)
+    ('v0 -> ('v1 -> 'v0))
+    (nat -> nat)
+    (('v1 -> 'v2) -> ('v1 -> 'v2))
+    (bool -> (nat -> nat))
+    |}]
+;;
