@@ -24,4 +24,5 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
+  | ESeq of t * t
 [@@deriving sexp_of]

@@ -86,8 +86,16 @@ let rec unify (con : constraints) : substitution Or_error.t =
 let rec is_syntactic_value (t : t) : bool =
   match t with
   | EUnit | ETrue | EFalse | EZero | EAbs _ | EVar _ -> true
-  | EIf _ | EApp _ | EPred _ | EIsZero _ | ELet _ | ERef _ | EDeref _ | EAssign _ | EFix _
-    -> false
+  | EIf _
+  | EApp _
+  | EPred _
+  | EIsZero _
+  | ELet _
+  | ERef _
+  | EDeref _
+  | EAssign _
+  | EFix _
+  | ESeq _ -> false
   | ESucc t -> is_syntactic_value t
 ;;
 
@@ -150,6 +158,10 @@ let rec constraints (ctx : context) (t : t) : (ty * constraints) Or_error.t =
     let%bind ty, con = constraints ctx t in
     let v = TyVar (gensym ()) in
     return (v, (ty, TyArrow (v, v)) :: con)
+  | ESeq (t, t') ->
+    let%bind ty_t, con_t = constraints ctx t in
+    let%bind ty_t', con_t' = constraints ctx t' in
+    return (ty_t', ((ty_t, TyUnit) :: con_t) @ con_t')
 ;;
 
 (** Renames type variables to OCaml-like naming, assumes no free tyvars.

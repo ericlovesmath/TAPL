@@ -3,10 +3,6 @@ open Parser
 module Types = Types
 module Typecheck = Typecheck
 
-(* TODO: Add more cases *)
-(* TODO: Better checks for free vars, aside from syntactic *)
-(* TODO: Row Polymorphism *)
-
 let repl (s : string) =
   let t = s |> Lexer.of_string |> Lexer.lex |> Parser.run t_p in
   match t with
@@ -89,12 +85,11 @@ let%expect_test "value restriction tests" =
     let g = (!f) Z in
     f
    |};
-  (* TODO: Seq form *)
   repl
     {|
     let f = ref (fun x -> x) in
-    let x = (f := fun x -> #t) in
-    let y = (f := fun x -> Z) in
+    (f := fun x -> #t);
+    (f := fun x -> Z);
     f
     |};
   [%expect

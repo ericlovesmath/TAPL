@@ -90,7 +90,7 @@ let%expect_test "ty parse tests" =
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   t_app_p t <|> return t)
+   t_seq_p t <|> t_app_p t <|> return t)
     st
 
 and t_atom_p =
@@ -166,6 +166,11 @@ and t_assign_p =
    let%bind t = tok ASSIGN *> t_p in
    return (EAssign (v, t)))
     st
+
+and t_seq_p t =
+  match%map tok SEMI *> t_p with
+  | ESeq (t', t'') -> ESeq (ESeq (t, t'), t'')
+  | t' -> ESeq (t, t')
 ;;
 
 let%expect_test "t parse tests" =
