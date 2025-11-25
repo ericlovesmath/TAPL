@@ -122,13 +122,19 @@
 - Add Error form
 - Add REPL support
 
-- Potential TODOs:
+# Week 8
 
-    - FJ: Better error messages in typechecker / evaluator
-    - FJ: Less tolerant parser for constructors
-    - FJ: Check for dependency cycles in subtyping
-    - FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
-    - REC: More examples and tests
+- ML-style Polymorphism!
+
+    - Minimal parser and types
+    - `constraints`, `unify`, and `subst` based polymorphism
+    - Functions added with implicit newly generated type variable
+    - `rename_tyvars` pass to rename variables like `'v12` to `'a`
+    - `let` form added, `generalize`ing over type schemes for performance
+    - REPL support (no eval, would be same as previous languages)
+    - `ref` cells with value restriction
+    - `letrec`, `fix`, and `seq` forms
+    - Tests for all new cases
 
 # TODO
 
@@ -140,3 +146,16 @@
 - Upload notes on TAPL to Github
 - Chapter 18/19 tests with objects
 - Web interface to quickly run examples
+
+- Potential TODOs:
+
+    - FJ: Better error messages in typechecker / evaluator
+    - FJ: Less tolerant parser for constructors
+    - FJ: Check for dependency cycles in subtyping
+    - FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
+    - REC: More examples and tests
+
+    - GM: Add more cases in general
+    - GM: Tuples (need TupleProj type?)
+    - GM: Row Polymorphism with records
+    - GM: Better checks for free vars, aside from syntactic restriction
