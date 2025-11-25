@@ -21,6 +21,7 @@ let apply_to_ty (sub : substitution) (ty : ty) : ty =
     | TyVar v -> List.Assoc.find ~equal:String.equal sub v |> Option.value ~default:ty
     | TyUnit | TyBool | TyNat -> ty
     | TyArrow (f, x) -> TyArrow (aux f, aux x)
+    | TyRef ty -> TyRef (aux ty)
   in
   aux ty
 ;;
@@ -41,6 +42,7 @@ let generalize (ctx : context) (ty : ty) : type_scheme =
     | TyVar v -> String.Set.singleton v
     | TyUnit | TyBool | TyNat -> String.Set.empty
     | TyArrow (t1, t2) -> Set.union (ftv_of_ty t1) (ftv_of_ty t2)
+    | TyRef ty -> ftv_of_ty ty
   in
   let ftv_of_scheme scheme =
     let vars, ty = scheme in
@@ -60,6 +62,7 @@ let rec unify (con : constraints) : substitution Or_error.t =
       | TyVar v' -> String.equal v v'
       | TyUnit | TyBool | TyNat -> false
       | TyArrow (ty, ty') -> has_infinite_type ty || has_infinite_type ty'
+      | TyRef ty -> has_infinite_type ty
     in
     if has_infinite_type ty
     then error_s [%message "unify: recursive unification" (v : string) (ty : ty)]
@@ -74,6 +77,18 @@ let rec unify (con : constraints) : substitution Or_error.t =
     then unify con
     else error_s [%message "unify: invalid equality constraint" (ty : ty) (ty' : ty)]
   | (TyArrow (f, x), TyArrow (f', x')) :: con -> unify ((f, f') :: (x, x') :: con)
+  | ((TyArrow _ as ty), ty') :: _ | (ty', (TyArrow _ as ty)) :: _ ->
+    error_s [%message "unify: -> type expects another ->" (ty : ty) (ty' : ty)]
+  | (TyRef ty, TyRef ty') :: con -> unify ((ty, ty') :: con)
+;;
+
+(** Determines if an expression is a syntactic value (non-expansive). *)
+let rec is_syntactic_value (t : t) : bool =
+  match t with
+  | EUnit | ETrue | EFalse | EZero | EAbs _ | EVar _ -> true
+  | EIf _ | EApp _ | EPred _ | EIsZero _ | ELet _ | ERef _ | EDeref _ | EAssign _ | EFix _
+    -> false
+  | ESucc t -> is_syntactic_value t
 ;;
 
 let rec constraints (ctx : context) (t : t) : (ty * constraints) Or_error.t =
@@ -113,9 +128,28 @@ let rec constraints (ctx : context) (t : t) : (ty * constraints) Or_error.t =
     let%bind sub_bind = unify con_bind in
     let ty_bind = apply_to_ty sub_bind ty_bind in
     let ctx = apply_to_context sub_bind ctx in
-    let scheme = generalize ctx ty_bind in
-    let ctx = Map.set ctx ~key:v ~data:scheme in
-    constraints ctx t
+    (* NOTE: Value Restriction, only generalize if syntactic *)
+    let scheme = if is_syntactic_value b then generalize ctx ty_bind else [], ty_bind in
+    let ctx_for_body = Map.set ctx ~key:v ~data:scheme in
+    let%bind ty_body, con_body = constraints ctx_for_body t in
+    return (ty_body, con_bind @ con_body)
+  | ERef e ->
+    let%map ty_e, con_e = constraints ctx e in
+    TyRef ty_e, con_e
+  | EDeref e ->
+    let%bind ty_e, con_e = constraints ctx e in
+    let v = TyVar (gensym ()) in
+    return (v, (ty_e, TyRef v) :: con_e)
+  | EAssign (v, t) ->
+    let%bind vars, ty_scheme = Map.find_or_error ctx v in
+    let sub = List.map vars ~f:(fun v -> v, TyVar (gensym ())) in
+    let ty_v = apply_to_ty sub ty_scheme in
+    let%bind ty_t, con = constraints ctx t in
+    return (TyUnit, (ty_v, TyRef ty_t) :: con)
+  | EFix t ->
+    let%bind ty, con = constraints ctx t in
+    let v = TyVar (gensym ()) in
+    return (v, (ty, TyArrow (v, v)) :: con)
 ;;
 
 (** Renames type variables to OCaml-like naming, assumes no free tyvars.
@@ -134,6 +168,7 @@ let rename_tyvars (ty : ty) : ty =
     | TyVar v -> Set.add set v
     | TyUnit | TyBool | TyNat -> set
     | TyArrow (ty, ty') -> collect_vars (collect_vars set ty) ty'
+    | TyRef ty -> collect_vars set ty
   in
   let substitution_map =
     ty
@@ -145,6 +180,7 @@ let rename_tyvars (ty : ty) : ty =
   let rec rename = function
     | TyVar v -> TyVar (Map.find_exn substitution_map v)
     | TyArrow (ty, ty') -> TyArrow (rename ty, rename ty')
+    | TyRef ty -> TyRef (rename ty)
     | (TyUnit | TyBool | TyNat) as ty -> ty
   in
   rename ty

@@ -4,6 +4,7 @@ type ty =
   | TyBool
   | TyNat
   | TyArrow of ty * ty
+  | TyRef of ty
 [@@deriving equal, sexp_of]
 
 type t =
@@ -19,4 +20,8 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | EFix of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
 [@@deriving sexp_of]

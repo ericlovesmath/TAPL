@@ -45,7 +45,7 @@ and ty_arrow_p =
    return (TyArrow (l, r)))
     st
 
-and ty_ref_p = fun st -> (tok REF *> ty_p) st
+and ty_ref_p = fun st -> (tok REF *> ty_p >>| fun ty -> TyRef ty) st
 and ty_var_p = fun st -> (tok TICK *> ident_p >>| fun v -> TyVar v) st
 
 let%expect_test "ty parse tests" =
@@ -107,14 +107,18 @@ and t_atom_p =
   let t_commit_prefix_p =
     match%bind peek with
     | LET -> t_let_p
+    | LETREC -> t_letrec_p
     | IF -> t_if_p
     | SUCC -> t_succ_p
     | PRED -> t_pred_p
     | ISZERO -> t_iszero_p
     | FUN -> t_abs_p
+    | FIX -> t_fix_p
+    | REF -> tok REF *> t_p >>| fun t -> ERef t
+    | BANG -> tok BANG *> t_p >>| fun t -> EDeref t
     | _ -> fail "commit: not a fixed prefix"
   in
-  (t_singles_p <|> t_commit_prefix_p) st
+  (t_assign_p <|> t_singles_p <|> t_commit_prefix_p) st
 
 and t_let_p =
   fun st ->
@@ -139,12 +143,28 @@ and t_app_p t =
 and t_succ_p = fun st -> (tok SUCC *> t_p >>| fun t -> ESucc t) st
 and t_pred_p = fun st -> (tok PRED *> t_p >>| fun t -> EPred t) st
 and t_iszero_p = fun st -> (tok ISZERO *> t_p >>| fun t -> EIsZero t) st
+and t_fix_p = fun st -> (tok FIX *> t_p >>| fun t -> EFix t) st
 
 and t_abs_p =
   fun st ->
   (let%bind id = tok FUN *> ident_p in
    let%bind t = tok ARROW *> t_p in
    return (EAbs (id, t)))
+    st
+
+and t_letrec_p =
+  fun st ->
+  (let%bind id = tok LETREC *> ident_p in
+   let%bind bind = tok EQ *> t_p in
+   let%bind body = tok IN *> t_p in
+   return (ELet (id, EFix (EAbs (id, bind)), body)))
+    st
+
+and t_assign_p =
+  fun st ->
+  (let%bind v = ident_p in
+   let%bind t = tok ASSIGN *> t_p in
+   return (EAssign (v, t)))
     st
 ;;
 
@@ -185,5 +205,5 @@ let%expect_test "t parse tests" =
     (Ok (((Z Z) Z) Z))
     (Ok (iszero (pred (S (S Z)))))
     (Ok (fun x -> x))
-    |}];
+    |}]
 ;;

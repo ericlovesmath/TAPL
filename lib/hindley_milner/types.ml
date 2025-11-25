@@ -7,6 +7,7 @@ type ty =
   | TyBool
   | TyNat
   | TyArrow of ty * ty
+  | TyRef of ty
 [@@deriving equal]
 
 type t =
@@ -22,6 +23,10 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | EFix of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
 
 let sexp_of_ty ty =
   let rec parse = function
@@ -30,6 +35,7 @@ let sexp_of_ty ty =
     | TyBool -> Atom "bool"
     | TyNat -> Atom "nat"
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
+    | TyRef ty -> List [ parse ty; Atom "ref" ]
   in
   parse ty
 ;;
@@ -50,6 +56,10 @@ let sexp_of_t t =
     | ESucc t -> List [ Atom "S"; parse t ]
     | EPred t -> List [ Atom "pred"; parse t ]
     | EIsZero t -> List [ Atom "iszero"; parse t ]
+    | EFix t -> List [ Atom "fix"; parse t ]
+    | ERef t -> List [ Atom "ref"; parse t ]
+    | EDeref t -> List [ Atom "!"; parse t ]
+    | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
   in
   parse t
 ;;
