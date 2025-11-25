@@ -84,7 +84,14 @@ let%expect_test "value restriction tests" =
     let f = ref (fun x -> x) in
     let g = (!f) Z in
     f
-   |};
+    |};
+  repl
+    {|
+    let f = fun x -> x in
+    let g = f (fun x -> x) in
+    let x = g (S Z) in
+    g #t
+    |};
   repl
     {|
     let f = ref (fun x -> x) in
@@ -97,6 +104,7 @@ let%expect_test "value restriction tests" =
     (nat ref)
     (('a -> 'a) ref)
     ((nat -> nat) ref)
+    (ty_error ("unify: invalid equality constraint" (ty nat) (ty' bool)))
     (ty_error ("unify: invalid equality constraint" (ty bool) (ty' nat)))
     |}]
 ;;
