@@ -53,6 +53,7 @@ module Simply_typed_repl = Make (Simply_typed_extended)
 module Subtyping_repl = Make (Subtyping)
 module Featherweight_java_repl = Make (Featherweight_java)
 module Recursive_types_repl = Make (Recursive_types)
+module Hindley_milner_repl = Make (Hindley_milner)
 
 let command =
   Command.basic
@@ -67,6 +68,7 @@ let command =
        | "sub" -> Subtyping_repl.start ()
        | "fj" | "java" -> Featherweight_java_repl.start ()
        | "rec" | "recursive" -> Recursive_types_repl.start ()
+       | "hm" | "let" | "letpoly" -> Hindley_milner_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 
