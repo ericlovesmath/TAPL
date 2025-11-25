@@ -14,7 +14,6 @@ type ty =
   | TyRec of string * ty
 [@@deriving sexp_of, equal]
 
-(* Church-style simply typed lambda calculus *)
 type t =
   | EUnit
   | ETrue
