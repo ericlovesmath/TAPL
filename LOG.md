@@ -136,6 +136,22 @@
     - `letrec`, `fix`, and `seq` forms
     - Tests for all new cases
 
+# Week 9
+
+- System F
+
+    - Parser for universal and existential types / related terms
+    - Typechecking for universal and existential types
+    - Tests for universal types
+
+- TODO: Ascription to act as type alias, as its really hard to read some types
+- TODO: Add Records / Tuples to make better tests for existential types
+- TODO: Rewrite to `ty_shift`/`ty_subst` semantics instead
+- TODO: Add List functions and tests
+- TODO: Add global eval function
+
+# Week 10
+
 # TODO
 
 - REPL interface for type inference and evaluation
