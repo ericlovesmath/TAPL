@@ -18,9 +18,9 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect {| (ty bool) |}];
   repl "if #t then #f else #f";
   [%expect {| (ty bool) |}];
-  repl "if (fun x : bool -> x) then #t else #f";
+  repl "if (fun (x : bool) -> x) then #t else #f";
   [%expect {| (ty_error ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
-  repl "if #t then #t else (fun x : bool -> x)";
+  repl "if #t then #t else (fun (x : bool) -> x)";
   [%expect
     {|
     (ty_error
@@ -28,7 +28,7 @@ let%expect_test "typechecker tests prior to extending" =
     |}];
   repl "y";
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
-  let id = "(fun x : bool -> x)" in
+  let id = "(fun (x : bool) -> x)" in
   repl id;
   [%expect {| (ty (bool -> bool)) |}];
   repl [%string "(%{id} #t)"];
@@ -41,6 +41,6 @@ let%expect_test "typechecker tests prior to extending" =
     |}];
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
-  repl "(fun x : (bool -> bool) -> x)";
+  repl "(fun (x : bool -> bool) -> x)";
   [%expect {| (ty ((bool -> bool) -> (bool -> bool))) |}]
 ;;
