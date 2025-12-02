@@ -24,6 +24,8 @@ type token =
   | DOT
   | LANGLE
   | RANGLE
+  | LBRACKET
+  | RBRACKET
   | SEMI
   | COLON
   | COMMA
@@ -56,6 +58,9 @@ type token =
   | RETURN
   | REC
   | TICK
+  | FORALL
+  | STAR
+  | EXISTS
   | INT of int
   | BASE of char
   | ID of string
@@ -119,12 +124,15 @@ let read_lexeme t =
     | '}' -> skip t; RCURLY
     | '<' -> skip t; LANGLE
     | '>' -> skip t; RANGLE
+    | '[' -> skip t; LBRACKET
+    | ']' -> skip t; RBRACKET
     | ';' -> skip t; SEMI
     | ',' -> skip t; COMMA
     | '.' -> skip t; DOT
     | '|' -> skip t; BAR
     | '!' -> skip t; BANG
     | '\'' -> skip t; TICK
+    | '*' -> skip t; STAR
     | '#' -> (
         skip t;
         match next t with
@@ -166,6 +174,8 @@ let read_lexeme t =
         | "new" -> NEW
         | "return" -> RETURN
         | "rec" -> REC
+        | "forall" -> FORALL
+        | "exists" -> EXISTS
         | _ ->
             if String.length s = 1 && Char.(is_uppercase (of_string s))
             then BASE (Char.of_string s)

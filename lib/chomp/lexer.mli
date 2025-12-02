@@ -18,6 +18,8 @@ type token =
   | DOT
   | LANGLE
   | RANGLE
+  | LBRACKET
+  | RBRACKET
   | SEMI
   | COLON
   | COMMA
@@ -50,6 +52,9 @@ type token =
   | RETURN
   | REC
   | TICK
+  | FORALL
+  | STAR
+  | EXISTS
   | INT of int
   | BASE of char
   | ID of string
