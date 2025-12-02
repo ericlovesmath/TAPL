@@ -44,3 +44,33 @@ let%expect_test "typechecker tests prior to extending" =
   repl "(fun (x : bool -> bool) -> x)";
   [%expect {| (ty ((bool -> bool) -> (bool -> bool))) |}]
 ;;
+
+let%expect_test "universal types typechecking" =
+  repl "fun X . fun (x : X) -> x";
+  repl "let id = fun X . fun (x : X) -> x in id [nat]";
+  [%expect
+    {|
+    (ty (forall X . (X -> X)))
+    (ty (nat -> nat))
+   |}];
+  let nil = "fun X . (fun R . fun (c : X -> R -> R) -> fun (n : R) -> n)" in
+  let cons =
+    {|
+    fun X .
+      fun (hd : X) ->
+          fun (tl : (forall R . (X -> R -> R) -> R -> R)) ->
+            (fun R . fun (c : X -> R -> R) -> fun (n : R) -> c hd ((tl [R]) c n))
+    |}
+  in
+  repl nil;
+  repl cons;
+  [%expect
+    {|
+    (ty (forall X . (forall R . ((X -> (R -> R)) -> (R -> R)))))
+    (ty
+     (forall X .
+      (X ->
+       ((forall R . ((X -> (R -> R)) -> (R -> R))) ->
+        (forall R . ((X -> (R -> R)) -> (R -> R)))))))
+    |}]
+;;

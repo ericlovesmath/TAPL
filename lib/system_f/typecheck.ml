@@ -1,6 +1,27 @@
 open Core
 open Types
 
+let rec ty_subst (v : string) (src : ty) (dst : ty) : ty =
+  let aux = ty_subst v src in
+  match dst with
+  | TyVar v' -> if String.equal v v' then src else dst
+  | TyUnit | TyBool | TyNat -> dst
+  | TyArrow (f, x) -> TyArrow (aux f, aux x)
+  | TyForall (v', t) ->
+    if String.equal v v' then TyForall (v', t) else TyForall (v', aux t)
+  | TyExists (v', t) ->
+    if String.equal v v' then TyExists (v', t) else TyExists (v', aux t)
+;;
+
+let rec is_free (v : string) (t : ty) : bool =
+  match t with
+  | TyVar v' -> String.equal v v'
+  | TyUnit | TyBool | TyNat -> false
+  | TyArrow (ty, ty') -> is_free v ty || is_free v ty'
+  | TyForall (v', ty) | TyExists (v', ty) ->
+    if String.equal v v' then false else is_free v ty
+;;
+
 let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
   let open Or_error.Let_syntax in
   match t with
@@ -50,10 +71,43 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     (match%bind type_of ctx t with
      | TyNat -> Ok TyBool
      | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
-  | ETyAbs _ -> failwith "TODO: typecheck ETyAbs"
-  | ETyApp _ -> failwith "TODO: typecheck ETyApp"
-  | EPack _ -> failwith "TODO: typecheck EPack"
-  | EUnpack _ -> failwith "TODO: typecheck EUnpack"
+  | ETyAbs (ty_var, t) ->
+    let%map ty_t = type_of ctx t in
+    TyForall (ty_var, ty_t)
+  | ETyApp (t, ty_arg) ->
+    let%bind ty_t = type_of ctx t in
+    (match ty_t with
+     | TyForall (ty_var, ty_body) -> Ok (ty_subst ty_var ty_arg ty_body)
+     | _ -> error_s [%message "expected universal type" (ty_t : ty)])
+  | EPack (ty_real, t, ty_package) ->
+    (match ty_package with
+     | TyExists (ty_var, ty_body) ->
+       let%bind ty_t = type_of ctx t in
+       let expected_ty = ty_subst ty_var ty_real ty_body in
+       if equal_ty ty_t expected_ty
+       then Ok ty_package
+       else
+         error_s
+           [%message
+             "pack term does not match declared existential type"
+               (ty_t : ty)
+               (expected_ty : ty)]
+     | _ ->
+       error_s [%message "pack annotation must be an existential type" (ty_package : ty)])
+  | EUnpack (ty_v, t_v, t_package, t_body) ->
+    let%bind ty_pkg = type_of ctx t_package in
+    (match ty_pkg with
+     | TyExists (ex_v, ex_b) ->
+       let concrete_body_ty = ty_subst ex_v (TyVar ty_v) ex_b in
+       let ctx = Map.set ctx ~key:t_v ~data:concrete_body_ty in
+       let%bind result_ty = type_of ctx t_body in
+       if is_free ty_v result_ty
+       then
+         error_s
+           [%message
+             "existential type variable escapes scope" (ty_v : string) (result_ty : ty)]
+       else Ok result_ty
+     | _ -> error_s [%message "unpack expects existential type" (ty_pkg : ty)])
 ;;
 
 let typecheck = type_of String.Map.empty
