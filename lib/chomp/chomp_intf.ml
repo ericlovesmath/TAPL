@@ -5,11 +5,20 @@ module type Parsable = sig
   type token [@@deriving sexp, equal]
 end
 
+module type Maybe = sig
+  type 'a t
+
+  include Applicative.S with type 'a t := 'a t
+  include Monad.S with type 'a t := 'a t
+end
+
 module type Parser = sig
   include Parsable
 
+  module Maybe : Maybe
+
   type stream
-  type 'a t = stream -> ('a * stream) Or_error.t
+  type 'a t = stream -> ('a * stream) Maybe.t
 
   (** Run parser [p] on string [s], ensuring the entire input is consumed.
     Error messages state line/col of error *)
@@ -31,7 +40,16 @@ module type Parser = sig
     val ( <* ) : 'a t -> 'ignore t -> 'a t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val ( <*>| ) : ('a -> 'b) t -> 'a t Lazy.t -> 'b t
+
+    (** Replace error message *)
+    val ( <?> ) : 'a t -> string -> 'a t
+
+    (** Annotate with error message *)
+    val ( <??> ) : 'a t -> string -> 'a t
   end
+
+  (** If commited, alternatives don't backtrack *)
+  val commit : 'a t -> 'a t
 
   val satisfy : (token -> bool) -> token t
   val satisfy_map : (token -> 'a option) -> 'a t
@@ -42,6 +60,7 @@ module type Parser = sig
   val sep_by : 'a t -> 'b t -> 'b list t
   val tok : token -> token t
   val fail : string -> 'a t
+  val fatal : string -> 'a t
 end
 
 module type Make = functor (M : Parsable) ->
@@ -49,7 +68,7 @@ module type Make = functor (M : Parsable) ->
 
 module type Intf = sig
   module type Parser = Parser
-  module Lexer = Lexer
 
+  module Lexer = Lexer
   module Make : Make
 end

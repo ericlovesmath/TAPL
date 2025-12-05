@@ -12,6 +12,7 @@ let ident_p : string t =
     | ID s -> Some s
     | BASE c -> Some (String.of_char c)
     | _ -> None)
+  <??> "ident"
 ;;
 
 let between brace_type p =
@@ -21,13 +22,13 @@ let between brace_type p =
     | `Curly -> LCURLY, RCURLY
     | `Angle -> LANGLE, RANGLE
   in
-  tok l *> p <* tok r
+  tok l *> commit (p <* tok r) <??> "between"
 ;;
 
 let rec ty_p =
   fun st ->
   let ty_p = ty_arrow_p <|> ty_atom_p in
-  (ty_p <|> between `Paren ty_p) st
+  (ty_p <|> between `Paren ty_p <??> "ty") st
 
 and ty_atom_p = fun st -> (ty_singles_p <|> ty_forall <|> ty_exists <|> ty_ref_p) st
 
@@ -39,29 +40,39 @@ and ty_singles_p =
     | ID s -> Some (TyVar s)
     | BASE c -> Some (TyVar (String.of_char c))
     | _ -> None)
+  <??> "ty_single"
 
 and ty_arrow_p =
   fun st ->
   (let%bind l = ty_atom_p <|> between `Paren ty_p in
-   let%bind _ = tok ARROW in
-   let%bind r = ty_p in
-   return (TyArrow (l, r)))
+   tok ARROW
+   *> commit
+        (let%bind r = ty_p in
+         return (TyArrow (l, r)))
+   <??> "ty_arrow")
     st
 
-and ty_ref_p = fun st -> (tok REF *> ty_p) st
+and ty_ref_p = fun st -> (tok REF *> commit ty_p <??> "ty_ref") st
 
 and ty_forall =
   fun st ->
-  (let%bind v = tok FORALL *> ident_p in
-   let%bind ty = tok DOT *> ty_p in
-   return (TyForall (v, ty)))
+  (tok FORALL
+   *> commit
+        (let%bind v = ident_p in
+         let%bind ty = tok DOT *> ty_p in
+         return (TyForall (v, ty)))
+   <??> "ty_forall")
     st
 
 and ty_exists =
   fun st ->
-  (let%bind v = tok LCURLY *> tok EXISTS *> ident_p in
-   let%bind ty = tok COMMA *> ty_p <* tok RCURLY in
-   return (TyExists (v, ty)))
+  (tok LCURLY
+   *> tok EXISTS
+   *> commit
+        (let%bind v = ident_p in
+         let%bind ty = tok COMMA *> ty_p <* tok RCURLY in
+         return (TyExists (v, ty)))
+   <??> "ty_exists")
     st
 ;;
 
@@ -83,8 +94,6 @@ let%expect_test "ty parse tests" =
   test "(A -> X) -> (nat -> bool)";
   test "forall X . X";
   test "{exists X, X -> bool}";
-  test "";
-  test "()";
   [%expect
     {|
     (Ok A)
@@ -96,15 +105,24 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok (forall X . X))
     (Ok ({ exists X , (X -> bool) }))
-    (Error "satisfy: EOF")
-    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
+    |}];
+  test "forall X nat";
+  test "(X -> forall X)";
+  test "";
+  test "()";
+  [%expect
+    {|
+    (Error (ty (ty_forall satisfy)))
+    (Error (ty (between (ty (ty_arrow (ty (ty_forall satisfy)))))))
+    (Error (ty (between "satisfy: EOF")))
+    (Error (ty (between (ty (between satisfy)))))
     |}]
 ;;
 
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   t_ty_app_p t <|> t_app_p t <|> return t)
+   t_ty_app_p t <|> t_app_p t <|> return t <??> "t")
     st
 
 and t_atom_p =
@@ -117,7 +135,9 @@ and t_atom_p =
       | ID v -> Some (EVar v)
       | ZERO -> Some EZero
       | _ -> None)
+    <??> "t_single"
   in
+  (* TODO: Refactor this and use [commit] instead *)
   let t_commit_prefix_p =
     match%bind peek with
     | LET -> t_let_p <|> t_unpack_p
@@ -129,57 +149,63 @@ and t_atom_p =
     | LCURLY -> t_pack_p
     | _ -> fail "commit: not a fixed prefix"
   in
-  (t_singles_p <|> t_commit_prefix_p) st
+  (t_singles_p <|> t_commit_prefix_p <??> "t_atom") st
 
 and t_let_p =
   fun st ->
-  (let%bind id = tok LET *> ident_p in
-   let%bind bind = tok EQ *> t_p in
-   let%bind body = tok IN *> t_p in
-   return (ELet (id, bind, body)))
+  ((let%bind id = tok LET *> ident_p in
+    let%bind bind = tok EQ *> t_p in
+    let%bind body = tok IN *> t_p in
+    return (ELet (id, bind, body)))
+   <??> "t_let")
     st
 
 and t_if_p =
   fun st ->
-  (let%bind c = tok IF *> t_p in
-   let%bind t = tok THEN *> t_p in
-   let%bind f = tok ELSE *> t_p <|> return EUnit in
-   return (EIf (c, t, f)))
+  (tok IF
+   *> commit
+        (let%bind c = t_p in
+         let%bind t = tok THEN *> t_p in
+         let%bind f = tok ELSE *> t_p <|> return EUnit in
+         return (EIf (c, t, f)))
+   <??> "t_if")
     st
 
 and t_app_p t =
   let%bind ts = many (t_atom_p <|> between `Paren t_p) in
-  return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:t ts)
+  return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:t ts) <??> "t_app"
 
-and t_succ_p = fun st -> (tok SUCC *> t_p >>| fun t -> ESucc t) st
-and t_pred_p = fun st -> (tok PRED *> t_p >>| fun t -> EPred t) st
-and t_iszero_p = fun st -> (tok ISZERO *> t_p >>| fun t -> EIsZero t) st
+and t_succ_p = fun st -> (tok SUCC *> commit t_p <??> "t_succ" >>| fun t -> ESucc t) st
+and t_pred_p = fun st -> (tok PRED *> commit t_p <??> "t_pred" >>| fun t -> EPred t) st
+
+and t_iszero_p =
+  fun st -> (tok ISZERO *> commit t_p <??> "t_iszero" >>| fun t -> EIsZero t) st
 
 and t_abs_p =
   fun st ->
   (let%bind id = tok FUN *> tok LPAREN *> ident_p in
    let%bind ty = tok COLON *> ty_p in
    let%bind t = tok RPAREN *> tok ARROW *> t_p in
-   return (EAbs (id, ty, t)))
+   return (EAbs (id, ty, t)) <??> "t_abs")
     st
 
 and t_ty_abs_p =
   fun st ->
   (let%bind v = tok FUN *> ident_p in
    let%bind t = tok DOT *> t_p in
-   return (ETyAbs (v, t)))
+   return (ETyAbs (v, t)) <??> "t_ty_abs")
     st
 
 and t_ty_app_p t =
-  let%map ty = tok LBRACKET *> ty_p <* tok RBRACKET in
-  ETyApp (t, ty)
+  let%bind ty = tok LBRACKET *> ty_p <* tok RBRACKET in
+  return (ETyApp (t, ty)) <??> "t_ty_app"
 
 and t_pack_p =
   fun st ->
   (let%bind ty = tok LCURLY *> tok STAR *> ty_p in
    let%bind t = tok COMMA *> t_p in
    let%bind ty_as = tok RCURLY *> tok AS *> ty_p in
-   return (EPack (ty, t, ty_as)))
+   return (EPack (ty, t, ty_as)) <??> "t_pack")
     st
 
 and t_unpack_p =
@@ -188,7 +214,7 @@ and t_unpack_p =
    let%bind v_t = tok COMMA *> ident_p in
    let%bind t = tok RCURLY *> tok EQ *> t_p in
    let%bind t_bind = tok IN *> t_p in
-   return (EUnpack (v_ty, v_t, t, t_bind)))
+   return (EUnpack (v_ty, v_t, t, t_bind)) <??> "t_unpack")
     st
 ;;
 
