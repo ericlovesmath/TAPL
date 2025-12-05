@@ -1,11 +1,13 @@
 open Core
+open Sexplib.Sexp
 
 type pos =
   { i : int
   ; line : int
   ; col : int
   }
-[@@deriving sexp]
+
+let sexp_of_pos { i = _; line; col } = Atom [%string "%{line#Int}:%{col#Int}"]
 
 type token =
   | UNIT

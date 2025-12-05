@@ -107,15 +107,16 @@ let%expect_test "ty parse tests" =
     (Ok ({ exists X , (X -> bool) }))
     |}];
   test "forall X nat";
-  test "(X -> forall X)";
+  test "(X -> forall X -> X)";
   test "";
   test "()";
   [%expect
     {|
-    (Error (ty (ty_forall satisfy)))
-    (Error (ty (between (ty (ty_arrow (ty (ty_forall satisfy)))))))
-    (Error (ty (between "satisfy: EOF")))
-    (Error (ty (between (ty (between satisfy)))))
+    (Error (ty (ty_forall (satisfy_fail (pos 1:10)))))
+    (Error
+     (ty (between (ty (ty_arrow (ty (ty_forall (satisfy_fail (pos 1:16)))))))))
+    (Error (ty (between satisfy_eof)))
+    (Error (ty (between (ty (between (satisfy_fail (pos 1:2)))))))
     |}]
 ;;
 

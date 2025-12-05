@@ -1,5 +1,5 @@
 type t
-type pos [@@deriving sexp]
+type pos [@@deriving sexp_of]
 
 type token =
   | UNIT

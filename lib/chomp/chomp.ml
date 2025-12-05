@@ -133,11 +133,7 @@ struct
   open Let_syntax
   open Infix_syntax
 
-  (* TODO: Add back pos *)
-  let fail ~pos msg =
-    ignore pos;
-    Fail (Error.of_lazy_sexp (lazy [%message msg]))
-  ;;
+  let fail ~pos msg = Fail (Error.of_lazy_sexp (lazy [%message msg (pos : pos)]))
 
   let commit p =
     fun st ->
@@ -151,24 +147,25 @@ struct
   let satisfy (pred : token -> bool) : token t =
     fun st ->
     match Sequence.next st with
-    | Some ((c, pos), st') -> if pred c then Success (c, st') else fail ~pos "satisfy"
-    | None -> Fail (Error.of_string "satisfy: EOF")
+    | Some ((c, pos), st') ->
+      if pred c then Success (c, st') else fail ~pos "satisfy_fail"
+    | None -> Fail (Error.of_string "satisfy_eof")
   ;;
 
   let satisfy_map (pred : token -> 'a option) : 'a t =
     fun st ->
     match Sequence.next st with
-    | None -> Fail (Error.of_string "satisfy_map: EOF")
+    | None -> Fail (Error.of_string "satisfy_map_eof")
     | Some ((c, pos), st') ->
       (match pred c with
        | Some c -> Success (c, st')
-       | None -> fail ~pos "satisfy_map")
+       | None -> fail ~pos "satisfy_map_fail")
   ;;
 
   let peek : token t =
     fun st ->
     match Sequence.next st with
-    | None -> Fail (Error.of_string "peek: EOF")
+    | None -> Fail (Error.of_string "peek_eof")
     | Some ((c, _), _) -> Success (c, st)
   ;;
 
@@ -182,7 +179,7 @@ struct
     Maybe.to_or_error
       (let%bind.Maybe x, st = p (Sequence.of_list s) in
        match Sequence.next st with
-       | Some ((_, pos), _) -> fail ~pos "run: stream not fully consumed"
+       | Some ((_, pos), _) -> fail ~pos "run_stream_not_fully_consumed"
        | None -> Success x)
   ;;
 

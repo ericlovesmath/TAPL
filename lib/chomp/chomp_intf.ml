@@ -1,7 +1,7 @@
 open Core
 
 module type Parsable = sig
-  type pos [@@deriving sexp]
+  type pos [@@deriving sexp_of]
   type token [@@deriving sexp, equal]
 end
 
