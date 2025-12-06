@@ -6,7 +6,10 @@ type ty =
   | TyUnit
   | TyBool
   | TyNat
+  | TyTuple of ty list
+  | TyRecord of (string * ty) list
   | TyArrow of ty * ty
+  | TyRef of ty
   | TyForall of string * ty
   | TyExists of string * ty
 [@@deriving equal]
@@ -15,6 +18,11 @@ type t =
   | EUnit
   | ETrue
   | EFalse
+  | ETuple of t list
+  | EProjTuple of t * int
+  | ERecord of (string * t) list
+  | EProjRecord of t * string
+  | ESeq of t * t
   | EIf of t * t * t
   | ELet of string * t * t
   | EVar of string
@@ -24,6 +32,9 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
   | ETyAbs of string * t
   | ETyApp of t * ty
   | EPack of ty * t * ty
@@ -36,8 +47,23 @@ let sexp_of_ty ty =
     | TyNat -> Atom "nat"
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
     | TyVar v -> Atom v
-    | TyForall (v, ty) -> List [ Atom"forall"; Atom v; Atom "."; parse ty ]
-    | TyExists (v, ty) -> List [ Atom "{"; Atom "exists"; Atom v; Atom ","; parse ty; Atom "}" ]
+    | TyForall (v, ty) -> List [ Atom "forall"; Atom v; Atom "."; parse ty ]
+    | TyExists (v, ty) ->
+      List [ Atom "{"; Atom "exists"; Atom v; Atom ","; parse ty; Atom "}" ]
+    | TyTuple tys ->
+      List
+        ([ Atom "{" ]
+         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse tys)
+         @ [ Atom "}" ])
+    | TyRecord record ->
+      let fields =
+        record
+        |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "{" ] @ fields @ [ Atom "}" ])
+    | TyRef ty -> List [ parse ty; Atom "ref" ]
   in
   parse ty
 ;;
@@ -47,6 +73,22 @@ let sexp_of_t t =
     | EUnit -> Atom "#u"
     | ETrue -> Atom "#t"
     | EFalse -> Atom "#f"
+    | ETuple ts ->
+      List
+        ([ Atom "{" ]
+         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse ts)
+         @ [ Atom "}" ])
+    | EProjTuple (t, i) -> List [ parse t; Atom "."; Atom (Int.to_string i) ]
+    | ERecord record ->
+      let sexp_of_fields fields =
+        fields
+        |> List.map ~f:(fun (l, t) -> [ Atom l; Atom ":"; parse t ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "{" ] @ sexp_of_fields record @ [ Atom "}" ])
+    | EProjRecord (t, l) -> List [ parse t; Atom "."; Atom l ]
+    | ESeq (t, t') -> List [ parse t; Atom ";"; parse t' ]
     | EIf (c, t, EUnit) -> List [ Atom "if"; parse c; Atom "then"; parse t ]
     | EIf (c, t, f) ->
       List [ Atom "if"; parse c; Atom "then"; parse t; Atom "else"; parse f ]
@@ -59,6 +101,9 @@ let sexp_of_t t =
     | ESucc t -> List [ Atom "S"; parse t ]
     | EPred t -> List [ Atom "pred"; parse t ]
     | EIsZero t -> List [ Atom "iszero"; parse t ]
+    | ERef t -> List [ Atom "ref"; parse t ]
+    | EDeref t -> List [ Atom "!"; parse t ]
+    | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
     | ETyAbs (v, t) -> List [ Atom "fun"; Atom v; Atom "."; parse t ]
     | ETyApp (t, ty) -> List [ parse t; Atom "["; sexp_of_ty ty; Atom "]" ]
     | EPack (ty, t, ty') ->

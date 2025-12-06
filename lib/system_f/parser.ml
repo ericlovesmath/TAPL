@@ -22,15 +22,20 @@ let between brace_type p =
     | `Curly -> LCURLY, RCURLY
     | `Angle -> LANGLE, RANGLE
   in
-  tok l *> commit (p <* tok r) <??> "between"
+  tok l *> p <* tok r <??> "between"
 ;;
+
+let commas p = sep_by1 (tok COMMA) p
 
 let rec ty_p =
   fun st ->
   let ty_p = ty_arrow_p <|> ty_atom_p in
   (ty_p <|> between `Paren ty_p <??> "ty") st
 
-and ty_atom_p = fun st -> (ty_singles_p <|> ty_forall <|> ty_exists <|> ty_ref_p) st
+and ty_atom_p =
+  fun st ->
+  (ty_singles_p <|> ty_forall <|> ty_exists <|> ty_tuple_p <|> ty_record_p <|> ty_ref_p)
+    st
 
 and ty_singles_p =
   satisfy_map (function
@@ -42,6 +47,26 @@ and ty_singles_p =
     | _ -> None)
   <??> "ty_single"
 
+and ty_tuple_p =
+  fun st ->
+  (let%bind tys = between `Curly (commas ty_p) in
+   return (TyTuple tys) <??> "ty_tuple")
+    st
+
+and field_p =
+  fun st ->
+  (let%bind l = ident_p in
+   let%bind _ = tok COLON in
+   let%bind r = ty_p in
+   return (l, r) <??> "ty_field")
+    st
+
+and ty_record_p =
+  fun st ->
+  (let%bind fields = between `Curly (commas field_p) in
+   return (TyRecord fields) <??> "ty_record")
+    st
+
 and ty_arrow_p =
   fun st ->
   (let%bind l = ty_atom_p <|> between `Paren ty_p in
@@ -52,7 +77,7 @@ and ty_arrow_p =
    <??> "ty_arrow")
     st
 
-and ty_ref_p = fun st -> (tok REF *> commit ty_p <??> "ty_ref") st
+and ty_ref_p = fun st -> (tok REF *> commit (ty_p >>| fun v -> TyRef v) <??> "ty_ref") st
 
 and ty_forall =
   fun st ->
@@ -119,14 +144,14 @@ let%expect_test "ty parse tests" =
      (ty
       (between
        (ty (ty_arrow (ty (ty_exists (ident (satisfy_map_fail (pos 1:15))))))))))
-    (Error (ty (between (ty (between (satisfy_fail (pos 1:2)))))))
+    (Error (ty (between (ty_ref (satisfy_fail (pos 1:2))))))
     |}]
 ;;
 
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   t_ty_app_p t <|> t_app_p t <|> return t <??> "t")
+   t_proj_p t <|> t_seq_p t <|> t_ty_app_p t <|> t_app_p t <|> return t <??> "t")
     st
 
 and t_atom_p =
@@ -141,7 +166,12 @@ and t_atom_p =
       | _ -> None)
     <??> "t_single"
   in
-  (t_singles_p
+  (t_assign_p
+   <|> t_singles_p
+   <|> t_ref_p
+   <|> t_deref_p
+   <|> t_record_p
+   <|> t_tuple_p
    <|> t_abs_p
    <|> t_ty_abs_p
    <|> t_if_p
@@ -163,6 +193,53 @@ and t_let_p =
          let%bind body = tok IN *> t_p in
          return (ELet (id, bind, body)))
    <??> "t_let")
+    st
+
+and t_tuple_p =
+  fun st ->
+  (let%bind ts = between `Curly (commas t_p) in
+   return (ETuple ts) <??> "t_tuple")
+    st
+
+and t_proj_p t =
+  let%bind _ = tok DOT in
+  (let%bind i =
+     satisfy_map (function
+       | INT i -> Some i
+       | _ -> None)
+   in
+   return (EProjTuple (t, i)) <??> "t_proj_tuple")
+  <|>
+  let%bind l = ident_p in
+  return (EProjRecord (t, l)) <??> "t_proj_record"
+
+and t_record_p =
+  fun st ->
+  let field_p =
+    let%bind l = ident_p in
+    let%bind r = tok EQ *> t_p in
+    return (l, r)
+  in
+  (let%bind fields = between `Curly (commas field_p) in
+   return (ERecord fields) <??> "t_record")
+    st
+
+and t_seq_p t =
+  (match%map tok SEMI *> t_p with
+   | ESeq (t', t'') -> ESeq (ESeq (t, t'), t'')
+   | t' -> ESeq (t, t'))
+  <??> "t_seq"
+
+and t_ref_p = fun st -> (tok REF *> commit (t_p >>| fun t -> ERef t) <??> "t_ref") st
+
+and t_deref_p =
+  fun st -> (tok BANG *> commit (t_p >>| fun t -> EDeref t) <??> "t_deref") st
+
+and t_assign_p =
+  fun st ->
+  (let%bind v = ident_p in
+   let%bind t = tok ASSIGN *> t_p in
+   return (EAssign (v, t)) <??> "t_assign")
     st
 
 and t_if_p =

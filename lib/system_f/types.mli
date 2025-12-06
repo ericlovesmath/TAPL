@@ -3,7 +3,10 @@ type ty =
   | TyUnit
   | TyBool
   | TyNat
+  | TyTuple of ty list
+  | TyRecord of (string * ty) list
   | TyArrow of ty * ty
+  | TyRef of ty
   | TyForall of string * ty
   | TyExists of string * ty
 [@@deriving sexp_of, equal]
@@ -12,6 +15,11 @@ type t =
   | EUnit
   | ETrue
   | EFalse
+  | ETuple of t list
+  | EProjTuple of t * int
+  | ERecord of (string * t) list
+  | EProjRecord of t * string
+  | ESeq of t * t
   | EIf of t * t * t
   | ELet of string * t * t
   | EVar of string
@@ -21,6 +29,9 @@ type t =
   | ESucc of t
   | EPred of t
   | EIsZero of t
+  | ERef of t
+  | EDeref of t
+  | EAssign of string * t
   | ETyAbs of string * t
   | ETyApp of t * ty
   | EPack of ty * t * ty

@@ -1,11 +1,20 @@
 open Core
 open Types
 
+let assert_unique_fields fields =
+  if Set.length (String.Set.of_list fields) = List.length fields
+  then Ok ()
+  else error_s [%message "duplicated labels in fields" (fields : string list)]
+;;
+
 let rec ty_subst (v : string) (src : ty) (dst : ty) : ty =
   let aux = ty_subst v src in
   match dst with
   | TyVar v' -> if String.equal v v' then src else dst
   | TyUnit | TyBool | TyNat -> dst
+  | TyTuple tys -> TyTuple (List.map ~f:aux tys)
+  | TyRecord tys -> TyRecord (List.map ~f:(Tuple2.map_snd ~f:aux) tys)
+  | TyRef ty -> TyRef (aux ty)
   | TyArrow (f, x) -> TyArrow (aux f, aux x)
   | TyForall (v', t) ->
     if String.equal v v' then TyForall (v', t) else TyForall (v', aux t)
@@ -14,12 +23,16 @@ let rec ty_subst (v : string) (src : ty) (dst : ty) : ty =
 ;;
 
 let rec is_free (v : string) (t : ty) : bool =
-  match t with
-  | TyVar v' -> String.equal v v'
-  | TyUnit | TyBool | TyNat -> false
-  | TyArrow (ty, ty') -> is_free v ty || is_free v ty'
-  | TyForall (v', ty) | TyExists (v', ty) ->
-    if String.equal v v' then false else is_free v ty
+  ignore v;
+  ignore t;
+  ignore is_free;
+  (* match t with *)
+  (* | TyVar v' -> String.equal v v' *)
+  (* | TyUnit | TyBool | TyNat -> false *)
+  (* | TyArrow (ty, ty') -> is_free v ty && is_free v ty' *)
+  (* | TyForall (v', ty) | TyExists (v', ty) -> *)
+  (*   if String.equal v v' then false else is_free v ty *)
+  failwith "is_free: TODO"
 ;;
 
 let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
@@ -27,6 +40,40 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
   match t with
   | EUnit -> Ok TyUnit
   | ETrue | EFalse -> Ok TyBool
+  | ETuple ts ->
+    let%map tys = Or_error.all (List.map ~f:(type_of ctx) ts) in
+    TyTuple tys
+  | ERecord record ->
+    let type_of_field (l, t) =
+      let%map ty = type_of ctx t in
+      l, ty
+    in
+    let%bind fields = Or_error.all (List.map ~f:type_of_field record) in
+    let%bind () = assert_unique_fields (List.map ~f:fst fields) in
+    Ok (TyRecord fields)
+  | EProjTuple (t, i) ->
+    (match%bind type_of ctx t with
+     | TyTuple tys ->
+       (match List.nth tys i with
+        | Some ty -> Ok ty
+        | None ->
+          error_s [%message "tuple projection on invalid index" (tys : ty list) (i : int)])
+     | _ -> error_s [%message "expected tuple to project from" (t : t)])
+  | EProjRecord (t, l) ->
+    (match%bind type_of ctx t with
+     | TyRecord tys ->
+       let%bind () = assert_unique_fields (List.map ~f:fst tys) in
+       (match List.Assoc.find tys l ~equal:String.equal with
+        | Some ty -> Ok ty
+        | None ->
+          error_s
+            [%message "record missing field" (tys : (string * ty) list) (l : string)])
+     | _ -> error_s [%message "expected record to project from" (t : t)])
+  | ESeq (t, t') ->
+    let%bind ty_t = type_of ctx t in
+    if equal_ty ty_t TyUnit
+    then type_of ctx t'
+    else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty)]
   | EIf (c, t, f) ->
     let%bind ty_c = type_of ctx c in
     if not (equal_ty ty_c TyBool)
@@ -71,6 +118,22 @@ let rec type_of (ctx : ty String.Map.t) (t : t) : ty Or_error.t =
     (match%bind type_of ctx t with
      | TyNat -> Ok TyBool
      | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty)])
+  | ERef t ->
+    let%map ty = type_of ctx t in
+    TyRef ty
+  | EDeref t ->
+    (match%bind type_of ctx t with
+     | TyRef ty -> Ok ty
+     | ty -> error_s [%message "deref expects ref" (ty : ty)])
+  | EAssign (v, t) ->
+    (match Map.find ctx v with
+     | Some (TyRef ty_v) ->
+       let%bind ty_t = type_of ctx t in
+       if equal_ty ty_v ty_t
+       then Ok TyUnit
+       else error_s [%message "assigning to ref of wrong type" (ty_v : ty) (ty_t : ty)]
+     | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty)]
+     | None -> error_s [%message "var not in context" v (ctx : ty String.Map.t)])
   | ETyAbs (ty_var, t) ->
     let%map ty_t = type_of ctx t in
     TyForall (ty_var, ty_t)

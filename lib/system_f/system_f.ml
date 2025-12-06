@@ -45,6 +45,56 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect {| (ty ((bool -> bool) -> (bool -> bool))) |}]
 ;;
 
+let%expect_test "seq tuple and record tests" =
+  repl "#t; #t";
+  repl "#u; #u; #f";
+  [%expect
+    {|
+    (ty_error ("[ESeq (t, t')] expected t to be unit" (ty_t bool)))
+    (ty bool)
+    |}];
+  let tup = "{ #t, fun (x : bool) -> x, #f }" in
+  repl tup;
+  repl [%string "%{tup}.0"];
+  repl [%string "%{tup}.1"];
+  repl [%string "%{tup}.2"];
+  repl [%string "%{tup}.3"];
+  [%expect
+    {|
+    (ty ({ bool , (bool -> bool) , bool }))
+    (ty bool)
+    (ty (bool -> bool))
+    (ty bool)
+    (ty_error
+     ("tuple projection on invalid index" (tys (bool (bool -> bool) bool)) (i 3)))
+    |}];
+  let record = "{ one = #t, two = { nest = fun (x : bool) -> x }}" in
+  repl record;
+  repl [%string "%{record}.one"];
+  repl [%string "%{record}.two"];
+  repl [%string "(%{record}.two).nest"];
+  repl [%string "%{record}.three"];
+  [%expect
+    {|
+    (ty ({ one : bool , two : ({ nest : (bool -> bool) }) }))
+    (ty bool)
+    (ty ({ nest : (bool -> bool) }))
+    (ty (bool -> bool))
+    (ty_error
+     ("record missing field" (tys ((one bool) (two ({ nest : (bool -> bool) }))))
+      (l three)))
+    |}]
+;;
+
+let%expect_test "ref tests" =
+  repl "let x = ref Z in !x";
+  [%expect {| (ty nat) |}];
+  repl "let not = ref (fun (x : bool) -> if x then #f else #t) in (!not) #t";
+  [%expect {| (ty bool) |}];
+  repl "let x = ref Z in (x := S Z); !x";
+  [%expect {| (ty nat) |}]
+;;
+
 let%expect_test "universal types typechecking" =
   repl "fun X . fun (x : X) -> x";
   repl "let id = fun X . fun (x : X) -> x in id [nat]";
