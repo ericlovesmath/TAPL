@@ -5,20 +5,12 @@ module type Parsable = sig
   type token [@@deriving sexp, equal]
 end
 
-module type Maybe = sig
-  type 'a t
-
-  include Applicative.S with type 'a t := 'a t
-  include Monad.S with type 'a t := 'a t
-end
-
 module type Parser = sig
   include Parsable
 
-  module Maybe : Maybe
-
   type stream
-  type 'a t = stream -> ('a * stream) Maybe.t
+  type 'a maybe
+  type 'a t = stream -> ('a * stream) maybe
 
   (** Run parser [p] on string [s], ensuring the entire input is consumed.
     Error messages state line/col of error *)
@@ -53,7 +45,6 @@ module type Parser = sig
 
   val satisfy : (token -> bool) -> token t
   val satisfy_map : (token -> 'a option) -> 'a t
-  val peek : token t
   val many1 : 'a t -> 'a list t
   val many : 'a t -> 'a list t
   val sep_by1 : 'a t -> 'b t -> 'b list t

@@ -2,58 +2,58 @@ open Core
 include Chomp_intf
 module Lexer = Lexer
 
-(* TODO: Fail and Fatal should track location separately *)
-
-module Maybe = struct
-  type 'a t =
-    | Success of 'a
-    | Fail of Error.t
-    | Fatal of Error.t
-
-  let to_or_error = function
-    | Fail e | Fatal e -> Error e
-    | Success x -> Ok x
-  ;;
-
-  include Applicative.Make (struct
-      type nonrec 'a t = 'a t
-
-      let apply mf mx =
-        match mf with
-        | Fail e -> Fail e
-        | Fatal e -> Fatal e
-        | Success f ->
-          (match mx with
-           | Fail e -> Fail e
-           | Fatal e -> Fatal e
-           | Success x -> Success (f x))
-      ;;
-
-      let return x = Success x
-      let map = `Define_using_apply
-    end)
-
-  include Monad.Make (struct
-      type nonrec 'a t = 'a t
-
-      let bind m ~f =
-        match m with
-        | Success x -> f x
-        | Fail e -> Fail e
-        | Fatal e -> Fatal e
-      ;;
-
-      let return = return
-      let map = `Define_using_bind
-    end)
-end
-
 module Make (M : Parsable) : Parser with type token = M.token and type pos = M.pos =
 struct
   include M
-  module Maybe = Maybe
+  (* TODO: Fail and Fatal should track location separately *)
+
+  module Maybe = struct
+    type 'a t =
+      | Success of 'a
+      | Fail of Error.t
+      | Fatal of Error.t
+
+    let to_or_error = function
+      | Fail e | Fatal e -> Error e
+      | Success x -> Ok x
+    ;;
+
+    include Applicative.Make (struct
+        type nonrec 'a t = 'a t
+
+        let apply mf mx =
+          match mf with
+          | Fail e -> Fail e
+          | Fatal e -> Fatal e
+          | Success f ->
+            (match mx with
+             | Fail e -> Fail e
+             | Fatal e -> Fatal e
+             | Success x -> Success (f x))
+        ;;
+
+        let return x = Success x
+        let map = `Define_using_apply
+      end)
+
+    include Monad.Make (struct
+        type nonrec 'a t = 'a t
+
+        let bind m ~f =
+          match m with
+          | Success x -> f x
+          | Fail e -> Fail e
+          | Fatal e -> Fatal e
+        ;;
+
+        let return = return
+        let map = `Define_using_bind
+      end)
+  end
+
   open Maybe
 
+  type 'a maybe = 'a Maybe.t
   type stream = (token * pos) Sequence.t
   type 'a t = stream -> ('a * stream) Maybe.t
 
@@ -142,8 +142,6 @@ struct
     | Fail e | Fatal e -> Fatal e
   ;;
 
-  (* TODO: Rewrite below with <?> and <??> syntax *)
-
   let satisfy (pred : token -> bool) : token t =
     fun st ->
     match Sequence.next st with
@@ -160,13 +158,6 @@ struct
       (match pred c with
        | Some c -> Success (c, st')
        | None -> fail ~pos "satisfy_map_fail")
-  ;;
-
-  let peek : token t =
-    fun st ->
-    match Sequence.next st with
-    | None -> Fail (Error.of_string "peek_eof")
-    | Some ((c, _), _) -> Success (c, st)
   ;;
 
   let rec many1 p = List.cons <$> p <*>| lazy (many p)
