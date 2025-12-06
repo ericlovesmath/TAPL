@@ -108,14 +108,17 @@ let%expect_test "ty parse tests" =
     |}];
   test "forall X nat";
   test "(X -> forall X -> X)";
-  test "";
+  test "(X -> {exists -> X)";
   test "()";
   [%expect
     {|
     (Error (ty (ty_forall (satisfy_fail (pos 1:10)))))
     (Error
      (ty (between (ty (ty_arrow (ty (ty_forall (satisfy_fail (pos 1:16)))))))))
-    (Error (ty (between satisfy_eof)))
+    (Error
+     (ty
+      (between
+       (ty (ty_arrow (ty (ty_exists (ident (satisfy_map_fail (pos 1:15))))))))))
     (Error (ty (between (ty (between (satisfy_fail (pos 1:2)))))))
     |}]
 ;;
@@ -138,26 +141,27 @@ and t_atom_p =
       | _ -> None)
     <??> "t_single"
   in
-  (* TODO: Refactor this and use [commit] instead *)
-  let t_commit_prefix_p =
-    match%bind peek with
-    | LET -> t_let_p <|> t_unpack_p
-    | IF -> t_if_p
-    | SUCC -> t_succ_p
-    | PRED -> t_pred_p
-    | ISZERO -> t_iszero_p
-    | FUN -> t_abs_p <|> t_ty_abs_p
-    | LCURLY -> t_pack_p
-    | _ -> fail "commit: not a fixed prefix"
-  in
-  (t_singles_p <|> t_commit_prefix_p <??> "t_atom") st
+  (t_singles_p
+   <|> t_abs_p
+   <|> t_ty_abs_p
+   <|> t_if_p
+   <|> t_unpack_p
+   <|> t_let_p
+   <|> t_succ_p
+   <|> t_pred_p
+   <|> t_iszero_p
+   <|> t_pack_p
+   <??> "t_atom")
+    st
 
 and t_let_p =
   fun st ->
-  ((let%bind id = tok LET *> ident_p in
-    let%bind bind = tok EQ *> t_p in
-    let%bind body = tok IN *> t_p in
-    return (ELet (id, bind, body)))
+  (tok LET
+   *> commit
+        (let%bind id = ident_p in
+         let%bind bind = tok EQ *> t_p in
+         let%bind body = tok IN *> t_p in
+         return (ELet (id, bind, body)))
    <??> "t_let")
     st
 
@@ -176,25 +180,30 @@ and t_app_p t =
   let%bind ts = many (t_atom_p <|> between `Paren t_p) in
   return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:t ts) <??> "t_app"
 
-and t_succ_p = fun st -> (tok SUCC *> commit t_p <??> "t_succ" >>| fun t -> ESucc t) st
-and t_pred_p = fun st -> (tok PRED *> commit t_p <??> "t_pred" >>| fun t -> EPred t) st
-
-and t_iszero_p =
-  fun st -> (tok ISZERO *> commit t_p <??> "t_iszero" >>| fun t -> EIsZero t) st
+and t_succ_p st = (tok SUCC *> commit t_p <??> "t_succ" >>| fun t -> ESucc t) st
+and t_pred_p st = (tok PRED *> commit t_p <??> "t_pred" >>| fun t -> EPred t) st
+and t_iszero_p st = (tok ISZERO *> commit t_p <??> "t_iszero" >>| fun t -> EIsZero t) st
 
 and t_abs_p =
   fun st ->
-  (let%bind id = tok FUN *> tok LPAREN *> ident_p in
-   let%bind ty = tok COLON *> ty_p in
-   let%bind t = tok RPAREN *> tok ARROW *> t_p in
-   return (EAbs (id, ty, t)) <??> "t_abs")
+  (tok FUN
+   *> tok LPAREN
+   *> commit
+        (let%bind id = ident_p in
+         let%bind ty = tok COLON *> ty_p in
+         let%bind t = tok RPAREN *> tok ARROW *> t_p in
+         return (EAbs (id, ty, t)))
+   <??> "t_abs")
     st
 
 and t_ty_abs_p =
   fun st ->
-  (let%bind v = tok FUN *> ident_p in
-   let%bind t = tok DOT *> t_p in
-   return (ETyAbs (v, t)) <??> "t_ty_abs")
+  (tok FUN
+   *> commit
+        (let%bind v = ident_p in
+         let%bind t = tok DOT *> t_p in
+         return (ETyAbs (v, t)))
+   <??> "t_ty_abs")
     st
 
 and t_ty_app_p t =
@@ -203,19 +212,26 @@ and t_ty_app_p t =
 
 and t_pack_p =
   fun st ->
-  (let%bind ty = tok LCURLY *> tok STAR *> ty_p in
-   let%bind t = tok COMMA *> t_p in
-   let%bind ty_as = tok RCURLY *> tok AS *> ty_p in
-   return (EPack (ty, t, ty_as)) <??> "t_pack")
+  (tok LCURLY
+   *> commit
+        (let%bind ty = tok STAR *> ty_p in
+         let%bind t = tok COMMA *> t_p in
+         let%bind ty_as = tok RCURLY *> tok AS *> ty_p in
+         return (EPack (ty, t, ty_as)))
+   <??> "t_pack")
     st
 
 and t_unpack_p =
   fun st ->
-  (let%bind v_ty = tok LET *> tok LCURLY *> ident_p in
-   let%bind v_t = tok COMMA *> ident_p in
-   let%bind t = tok RCURLY *> tok EQ *> t_p in
-   let%bind t_bind = tok IN *> t_p in
-   return (EUnpack (v_ty, v_t, t, t_bind)) <??> "t_unpack")
+  (tok LET
+   *> tok LCURLY
+   *> commit
+        (let%bind v_ty = ident_p in
+         let%bind v_t = tok COMMA *> ident_p in
+         let%bind t = tok RCURLY *> tok EQ *> t_p in
+         let%bind t_bind = tok IN *> t_p in
+         return (EUnpack (v_ty, v_t, t, t_bind)))
+   <??> "t_unpack")
     st
 ;;
 
@@ -267,5 +283,24 @@ let%expect_test "t parse tests" =
     (Ok ({* int , term } as bool))
     (Ok (let { ty , v } = Z in (S Z)))
     (Ok (id [ bool ]))
+    |}];
+  test
+    [%string
+      {|
+      let add =
+        (fun (x : nat) ->
+          (fun (y : nat) ->
+            (if (iszero x)
+              then y
+              else (add (pred x) (S y)))))
+      in add (S (S Z)) (S (S Z))
+      |}];
+  [%expect
+    {|
+    (Ok
+     (let add =
+      (fun x : nat ->
+       (fun y : nat -> (if (iszero x) then y else ((add (pred x)) (S y)))))
+      in ((add (S (S Z))) (S (S Z)))))
     |}]
 ;;
