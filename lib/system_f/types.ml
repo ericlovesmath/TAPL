@@ -14,6 +14,19 @@ type ty =
   | TyExists of string * ty
 [@@deriving equal]
 
+type ty_nameless =
+  | UTyVar of int
+  | UTyUnit
+  | UTyBool
+  | UTyNat
+  | UTyTuple of ty_nameless list
+  | UTyRecord of (string * ty_nameless) list
+  | UTyArrow of ty_nameless * ty_nameless
+  | UTyRef of ty_nameless
+  | UTyForall of ty_nameless
+  | UTyExists of ty_nameless
+[@@deriving equal]
+
 type t =
   | EUnit
   | ETrue
@@ -64,6 +77,33 @@ let sexp_of_ty ty =
       in
       List ([ Atom "{" ] @ fields @ [ Atom "}" ])
     | TyRef ty -> List [ parse ty; Atom "ref" ]
+  in
+  parse ty
+;;
+
+let sexp_of_ty_nameless ty =
+  let rec parse = function
+    | UTyUnit -> Atom "unit"
+    | UTyBool -> Atom "bool"
+    | UTyNat -> Atom "nat"
+    | UTyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
+    | UTyVar i -> Atom (Int.to_string i)
+    | UTyForall ty -> List [ Atom "forall"; Atom "."; parse ty ]
+    | UTyExists ty -> List [ Atom "{"; Atom "exists"; parse ty; Atom "}" ]
+    | UTyTuple tys ->
+      List
+        ([ Atom "{" ]
+         @ List.intersperse ~sep:(Atom ",") (List.map ~f:parse tys)
+         @ [ Atom "}" ])
+    | UTyRecord record ->
+      let fields =
+        record
+        |> List.map ~f:(fun (l, ty) -> [ Atom l; Atom ":"; parse ty ])
+        |> List.intersperse ~sep:[ Atom "," ]
+        |> List.concat
+      in
+      List ([ Atom "{" ] @ fields @ [ Atom "}" ])
+    | UTyRef ty -> List [ parse ty; Atom "ref" ]
   in
   parse ty
 ;;

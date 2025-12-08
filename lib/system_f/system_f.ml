@@ -10,7 +10,7 @@ let repl (s : string) =
   | Ok t ->
     (match Typecheck.typecheck t with
      | Error ty_error -> print_s [%message (ty_error : Error.t)]
-     | Ok ty -> print_s [%message (ty : Types.ty)])
+     | Ok ty -> print_s [%message (ty : Types.ty_nameless)])
 ;;
 
 let%expect_test "typechecker tests prior to extending" =
@@ -37,7 +37,7 @@ let%expect_test "typechecker tests prior to extending" =
   [%expect
     {|
     (ty_error
-     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_arg bool)))
+     ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_x (bool -> bool))))
     |}];
   repl "(#t #f)";
   [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
@@ -100,9 +100,9 @@ let%expect_test "universal types typechecking" =
   repl "let id = fun X . fun (x : X) -> x in id [nat]";
   [%expect
     {|
-    (ty (forall X . (X -> X)))
+    (ty (forall . (0 -> 0)))
     (ty (nat -> nat))
-   |}];
+    |}];
   let nil = "fun X . (fun R . fun (c : X -> R -> R) -> fun (n : R) -> n)" in
   let cons =
     {|
@@ -116,11 +116,11 @@ let%expect_test "universal types typechecking" =
   repl cons;
   [%expect
     {|
-    (ty (forall X . (forall R . ((X -> (R -> R)) -> (R -> R)))))
+    (ty (forall . (forall . ((1 -> (0 -> 0)) -> (0 -> 0)))))
     (ty
-     (forall X .
-      (X ->
-       ((forall R . ((X -> (R -> R)) -> (R -> R))) ->
-        (forall R . ((X -> (R -> R)) -> (R -> R)))))))
+     (forall .
+      (0 ->
+       ((forall . ((1 -> (0 -> 0)) -> (0 -> 0))) ->
+        (forall . ((1 -> (0 -> 0)) -> (0 -> 0)))))))
     |}]
 ;;

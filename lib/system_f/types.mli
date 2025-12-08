@@ -11,6 +11,19 @@ type ty =
   | TyExists of string * ty
 [@@deriving sexp_of, equal]
 
+type ty_nameless =
+  | UTyVar of int
+  | UTyUnit
+  | UTyBool
+  | UTyNat
+  | UTyTuple of ty_nameless list
+  | UTyRecord of (string * ty_nameless) list
+  | UTyArrow of ty_nameless * ty_nameless
+  | UTyRef of ty_nameless
+  | UTyForall of ty_nameless
+  | UTyExists of ty_nameless
+[@@deriving sexp_of, equal]
+
 type t =
   | EUnit
   | ETrue
