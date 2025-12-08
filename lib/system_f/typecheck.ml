@@ -238,4 +238,34 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | _ -> error_s [%message "unpack expects existential type" (ty_pkg : ty_nameless)])
 ;;
 
-let typecheck = type_of String.Map.empty []
+let rename_tyvars (ty : ty_nameless) : ty =
+  let counter = ref 0 in
+  let gensym () =
+    let i = !counter in
+    incr counter;
+    let char_code = Char.to_int 'A' + (i mod 26) in
+    let num_suffix = i / 26 in
+    let base_name = String.of_char (Char.of_int_exn char_code) in
+    if num_suffix = 0 then base_name else base_name ^ Int.to_string num_suffix
+  in
+  let rec aux (env : string list) (t : ty_nameless) : ty =
+    match t with
+    | UTyUnit -> TyUnit
+    | UTyBool -> TyBool
+    | UTyNat -> TyNat
+    | UTyVar i -> TyVar (List.nth_exn env i)
+    | UTyTuple ts -> TyTuple (List.map ts ~f:(aux env))
+    | UTyRecord fs -> TyRecord (List.map fs ~f:(fun (l, ty) -> l, aux env ty))
+    | UTyArrow (l, r) -> TyArrow (aux env l, aux env r)
+    | UTyRef ty -> TyRef (aux env ty)
+    | UTyForall body ->
+      let v = gensym () in
+      TyForall (v, aux (v :: env) body)
+    | UTyExists body ->
+      let v = gensym () in
+      TyExists (v, aux (v :: env) body)
+  in
+  aux [] ty
+;;
+
+let typecheck t = Or_error.map ~f:rename_tyvars (type_of String.Map.empty [] t)

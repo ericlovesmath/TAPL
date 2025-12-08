@@ -10,7 +10,7 @@ let repl (s : string) =
   | Ok t ->
     (match Typecheck.typecheck t with
      | Error ty_error -> print_s [%message (ty_error : Error.t)]
-     | Ok ty -> print_s [%message (ty : Types.ty_nameless)])
+     | Ok ty -> print_s [%message (ty : Types.ty)])
 ;;
 
 let%expect_test "typechecker tests prior to extending" =
@@ -100,7 +100,7 @@ let%expect_test "universal types typechecking" =
   repl "let id = fun X . fun (x : X) -> x in id [nat]";
   [%expect
     {|
-    (ty (forall . (0 -> 0)))
+    (ty (forall A . (A -> A)))
     (ty (nat -> nat))
     |}];
   let nil = "fun X . (fun R . fun (c : X -> R -> R) -> fun (n : R) -> n)" in
@@ -116,11 +116,11 @@ let%expect_test "universal types typechecking" =
   repl cons;
   [%expect
     {|
-    (ty (forall . (forall . ((1 -> (0 -> 0)) -> (0 -> 0)))))
+    (ty (forall A . (forall B . ((A -> (B -> B)) -> (B -> B)))))
     (ty
-     (forall .
-      (0 ->
-       ((forall . ((1 -> (0 -> 0)) -> (0 -> 0))) ->
-        (forall . ((1 -> (0 -> 0)) -> (0 -> 0)))))))
+     (forall A .
+      (A ->
+       ((forall C . ((A -> (C -> C)) -> (C -> C))) ->
+        (forall B . ((A -> (B -> B)) -> (B -> B)))))))
     |}]
 ;;
