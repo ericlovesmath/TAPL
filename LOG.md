@@ -145,9 +145,6 @@
     - Tests for universal types
 
 - TODO: Ascription to act as type alias, as its really hard to read some types
-- TODO: Add Records / Tuples to make better tests for existential types
-- TODO: Rewrite to `ty_shift`/`ty_subst` semantics instead
-- TODO: Add List functions and tests
 - TODO: Add global eval function
 
 # Week 10

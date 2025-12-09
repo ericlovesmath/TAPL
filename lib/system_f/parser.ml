@@ -202,16 +202,17 @@ and t_tuple_p =
     st
 
 and t_proj_p t =
-  let%bind _ = tok DOT in
-  (let%bind i =
-     satisfy_map (function
-       | INT i -> Some i
-       | _ -> None)
-   in
-   return (EProjTuple (t, i)) <??> "t_proj_tuple")
-  <|>
-  let%bind l = ident_p in
-  return (EProjRecord (t, l)) <??> "t_proj_record"
+  tok DOT
+  *> commit
+       ((let%bind i =
+           satisfy_map (function
+             | INT i -> Some i
+             | _ -> None)
+         in
+         return (EProjTuple (t, i)) <??> "t_proj_tuple")
+        <|>
+        let%bind l = ident_p in
+        return (EProjRecord (t, l)) <??> "t_proj_record")
 
 and t_record_p =
   fun st ->

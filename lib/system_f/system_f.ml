@@ -124,3 +124,47 @@ let%expect_test "universal types typechecking" =
         (forall B . ((A -> (B -> B)) -> (B -> B)))))))
     |}]
 ;;
+
+let%expect_test "existential types typechecking" =
+  repl
+    {|
+    {*nat, { a = Z, f = fun (x : nat) -> S x }}
+      as { exists X, { a : X, f: X -> X } }
+    |};
+  [%expect {| (ty ({ exists A , ({ a : A , f : (A -> A) }) })) |}];
+  repl "{ *nat, Z } as { exists X , X }";
+  repl "{ *bool, #t } as { exists X , X }";
+  repl "{ *bool, Z } as { exists X , X }";
+  repl "{ *bool, #t } as { exists X , bool }";
+  repl
+    "if #t then ({ *nat, Z } as { exists X , X }) else ({ *bool, #t } as { exists Y , Y \
+     })";
+  [%expect
+    {|
+    (ty ({ exists A , A }))
+    (ty ({ exists A , A }))
+    (ty_error
+     ("pack term does not match declared existential type" (ty_t nat)
+      (expected_ty bool)))
+    (ty ({ exists A , bool }))
+    (ty ({ exists A , A }))
+   |}];
+  let ty_counter = "{ exists C, { init : C, get : C -> nat, inc : C -> C } }" in
+  let counter =
+    [%string
+      {|
+        {*nat, { init = Z, get = fun (x : nat) -> x, inc = fun (x : nat) -> S x }}
+          as %{ty_counter}
+      |}]
+  in
+  repl counter;
+  repl [%string "let { Counter, c } = (%{counter}) in c"];
+  repl [%string "let { Counter, c } = (%{counter}) in ((c.get) ((c.inc) (c.init)))"];
+  [%expect {|
+    (ty ({ exists A , ({ init : A , get : (A -> nat) , inc : (A -> A) }) }))
+    (ty_error
+     ("existential type variable escapes scope"
+      (result_ty ({ init : 0 , get : (0 -> nat) , inc : (0 -> 0) }))))
+    (ty nat)
+    |}]
+;;
