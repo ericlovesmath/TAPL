@@ -135,6 +135,7 @@ let%expect_test "existential types typechecking" =
   repl "{ *nat, Z } as { exists X , X }";
   repl "{ *bool, #t } as { exists X , X }";
   repl "{ *bool, Z } as { exists X , X }";
+  repl "{ *nat, Z } as { exists X , Y }";
   repl "{ *bool, #t } as { exists X , bool }";
   repl
     "if #t then ({ *nat, Z } as { exists X , X }) else ({ *bool, #t } as { exists Y , Y \
@@ -146,9 +147,10 @@ let%expect_test "existential types typechecking" =
     (ty_error
      ("pack term does not match declared existential type" (ty_t nat)
       (expected_ty bool)))
+    (ty_error ("failed to find variable" Y (ctx (X))))
     (ty ({ exists A , bool }))
     (ty ({ exists A , A }))
-   |}];
+    |}];
   let ty_counter = "{ exists C, { init : C, get : C -> nat, inc : C -> C } }" in
   let counter =
     [%string

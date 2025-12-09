@@ -1,27 +1,46 @@
 open Core
 open Types
 
-let find (ctx : string list) (v : string) : int =
+let find (ctx : string list) (v : string) : int Or_error.t =
   let rec find' acc = function
-    | [] -> raise_s [%message "failed to find variable" v (ctx : string list)]
-    | h :: _ when String.equal h v -> acc
+    | [] -> error_s [%message "failed to find variable" v (ctx : string list)]
+    | h :: _ when String.equal h v -> Ok acc
     | _ :: t -> find' (acc + 1) t
   in
   find' 0 ctx
 ;;
 
-let rec remove_names (ctx : string list) (ty : ty) : ty_nameless =
+let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
+  let open Or_error.Let_syntax in
   match ty with
-  | TyUnit -> UTyUnit
-  | TyBool -> UTyBool
-  | TyNat -> UTyNat
-  | TyVar v -> UTyVar (find ctx v)
-  | TyTuple ts -> UTyTuple (List.map ts ~f:(remove_names ctx))
-  | TyRecord r -> UTyRecord (List.map r ~f:(fun (l, t) -> l, remove_names ctx t))
-  | TyArrow (l, r) -> UTyArrow (remove_names ctx l, remove_names ctx r)
-  | TyRef ty -> UTyRef (remove_names ctx ty)
-  | TyForall (v, ty) -> UTyForall (remove_names (v :: ctx) ty)
-  | TyExists (v, ty) -> UTyExists (remove_names (v :: ctx) ty)
+  | TyUnit -> Ok UTyUnit
+  | TyBool -> Ok UTyBool
+  | TyNat -> Ok UTyNat
+  | TyVar v ->
+    let%map v = find ctx v in
+    UTyVar v
+  | TyTuple ts ->
+    let%map ts = Or_error.all (List.map ~f:(remove_names ctx) ts) in
+    UTyTuple ts
+  | TyRecord r ->
+    let%map r =
+      Or_error.all
+        (List.map r ~f:(fun (l, t) -> Or_error.both (Ok l) (remove_names ctx t)))
+    in
+    UTyRecord r
+  | TyArrow (l, r) ->
+    let%bind l = remove_names ctx l in
+    let%bind r = remove_names ctx r in
+    return (UTyArrow (l, r))
+  | TyRef ty ->
+    let%map ty = remove_names ctx ty in
+    UTyRef ty
+  | TyForall (v, ty) ->
+    let%map ty = remove_names (v :: ctx) ty in
+    UTyForall ty
+  | TyExists (v, ty) ->
+    let%map ty = remove_names (v :: ctx) ty in
+    UTyExists ty
 ;;
 
 let shift (d : int) (ty : ty_nameless) =
@@ -143,10 +162,10 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | Some ty -> Ok ty
      | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
   | EAbs (v, ty_v, t) ->
-    let ty_v = remove_names ty_ctx ty_v in
+    let%bind ty_v = remove_names ty_ctx ty_v in
     let ctx = Map.set ctx ~key:v ~data:ty_v in
-    let%map ty_t = type_of ctx ty_ctx t in
-    UTyArrow (ty_v, ty_t)
+    let%bind ty_t = type_of ctx ty_ctx t in
+    return (UTyArrow (ty_v, ty_t))
   | EApp (f, x) ->
     let%bind ty_f = type_of ctx ty_ctx f in
     (match ty_f with
@@ -199,13 +218,13 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
     UTyForall ty_t
   | ETyApp (t, ty_arg) ->
     let%bind ty_t = type_of ctx ty_ctx t in
-    let ty_arg = remove_names ty_ctx ty_arg in
+    let%bind ty_arg = remove_names ty_ctx ty_arg in
     (match ty_t with
      | UTyForall ty_body -> Ok (subst_top ty_arg ty_body)
      | _ -> error_s [%message "expected universal type" (ty_t : ty_nameless)])
   | EPack (ty_real, t, ty_package) ->
-    let ty_real = remove_names ty_ctx ty_real in
-    let ty_package = remove_names ty_ctx ty_package in
+    let%bind ty_real = remove_names ty_ctx ty_real in
+    let%bind ty_package = remove_names ty_ctx ty_package in
     (match ty_package with
      | UTyExists ty_body ->
        let%bind ty_t = type_of ctx ty_ctx t in
