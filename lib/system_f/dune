@@ -1,6 +1,6 @@
 (library
  (name system_f)
- (libraries core chomp)
+ (libraries core chomp general_interpreter)
  (preprocess
   (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_compare ppx_string))
  (inline_tests))

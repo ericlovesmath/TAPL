@@ -1,0 +1,5 @@
+(library
+ (name general_interpreter)
+ (libraries core)
+ (preprocess (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_compare))
+ (inline_tests))
