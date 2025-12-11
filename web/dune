@@ -6,4 +6,4 @@
   (pps ppx_let ppx_sexp_conv ppx_expect ppx_sexp_message ppx_quick_test ppx_compare ppx_string
        ppx_css bonsai.ppx_bonsai))
  (modes exe js)
- (enabled_if (= %{profile} bonsai)))
+ (enabled_if (<= %{ocaml_version} 5.1.1)))

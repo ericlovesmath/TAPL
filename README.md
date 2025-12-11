@@ -8,4 +8,4 @@ Run `dune build` and `rlwrap ./_build/default/bin/main.exe -impl <IMPL>` for a s
 
 The `Makefile` provides convenient wrappers for building and running code
 
-NOTE: A opam switch called "bonsai" is expected to exist with the [Bonsai](https://github.com/janestreet/bonsai) frontend library installed, in order for `web` to build with the website containing interactive features and visualization. If the web repl is not important, delete the `web` folder and `dune-workspace` files.
+NOTE: `web` depends on the [Bonsai](https://github.com/janestreet/bonsai) frontend library, which is only supported (as of (2025-12-10) on OCaml 5.1.1 until [Jane Street's js_of_ocaml_patches](https://github.com/janestreet/js_of_ocaml_patches/issues/1) issue is resolved. `web` will not build unless `ocaml <= 5.1.1` is used, but the rest of the library will build on later versions.
