@@ -22,10 +22,9 @@
             libffi pcre zstd
           ];
 
+          # Shorter bash prompt
           shellHook = ''
-            # Shorter bash prompt
             PS1="\[\e[1;32m\]\W\[\e[0m\]\$ "
-            eval $(opam env --switch=bonsai)
           '';
         };
     };

@@ -7,3 +7,5 @@ Run `dune test` to run [let_expect](https://github.com/janestreet/ppx_expect) te
 Run `dune build` and `rlwrap ./_build/default/bin/main.exe -impl <IMPL>` for a simple REPL interface
 
 The `Makefile` provides convenient wrappers for building and running code
+
+NOTE: A opam switch called "bonsai" is expected to exist with the [Bonsai](https://github.com/janestreet/bonsai) frontend library installed, in order for `web` to build with the website containing interactive features and visualization. If the web repl is not important, delete the `web` folder and `dune-workspace` files.
