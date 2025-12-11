@@ -116,7 +116,7 @@ let%expect_test "ty parse tests" =
     (Ok top)
     (Ok bot)
     (Ok (A ref))
-    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
+    (Error (satisfy_fail (pos 1:2)))
     (Ok (nat -> unit))
     (Ok (A -> (X -> (nat -> bool))))
     (Ok ((A -> X) -> (nat -> bool)))
@@ -134,11 +134,11 @@ let%expect_test "ty parse tests" =
   test "()";
   [%expect
     {|
-    (Error "satisfy: EOF")
-    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
-    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
+    (Error satisfy_eof)
+    (Error (satisfy_fail (pos 1:1)))
+    (Error (satisfy_fail (pos 1:1)))
+    (Error (satisfy_fail (pos 1:1)))
+    (Error (satisfy_fail (pos 1:2)))
     |}]
 ;;
 

@@ -45,6 +45,7 @@ module type Parser = sig
 
   val satisfy : (token -> bool) -> token t
   val satisfy_map : (token -> 'a option) -> 'a t
+  val peek : token t
   val many1 : 'a t -> 'a list t
   val many : 'a t -> 'a list t
   val sep_by1 : 'a t -> 'b t -> 'b list t

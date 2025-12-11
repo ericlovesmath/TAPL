@@ -150,6 +150,13 @@ struct
     | None -> Fail (Error.of_string "satisfy_eof")
   ;;
 
+  let peek : token t =
+    fun st ->
+    match Sequence.next st with
+    | None -> Fail (Error.of_string "peek_eof")
+    | Some ((c, _), _) -> Success (c, st)
+  ;;
+
   let satisfy_map (pred : token -> 'a option) : 'a t =
     fun st ->
     match Sequence.next st with

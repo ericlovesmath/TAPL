@@ -81,9 +81,9 @@ let%expect_test "ty parse tests" =
   test "'nat";
   [%expect
     {|
-    (Error "satisfy: EOF")
-    (Error ((pos ((i 1) (line 1) (col 2))) "satisfy: pred not satisfied"))
-    (Error ((pos ((i 0) (line 1) (col 1))) "satisfy: pred not satisfied"))
+    (Error satisfy_eof)
+    (Error (satisfy_fail (pos 1:2)))
+    (Error (satisfy_fail (pos 1:1)))
     |}]
 ;;
 
