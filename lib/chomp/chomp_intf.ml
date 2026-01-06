@@ -33,9 +33,6 @@ module type Parser = sig
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val ( <*>| ) : ('a -> 'b) t -> 'a t Lazy.t -> 'b t
 
-    (** Replace error message *)
-    val ( <?> ) : 'a t -> string -> 'a t
-
     (** Annotate with error message *)
     val ( <??> ) : 'a t -> string -> 'a t
   end

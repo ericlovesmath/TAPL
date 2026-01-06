@@ -116,7 +116,7 @@ let%expect_test "ty parse tests" =
     (Ok top)
     (Ok bot)
     (Ok (A ref))
-    (Error (satisfy_fail (pos 1:2)))
+    (Error ((chomp_error "satisfy_fail on token LPAREN at 1:2") (contexts ())))
     (Ok (nat -> unit))
     (Ok (A -> (X -> (nat -> bool))))
     (Ok ((A -> X) -> (nat -> bool)))
@@ -134,11 +134,11 @@ let%expect_test "ty parse tests" =
   test "()";
   [%expect
     {|
-    (Error satisfy_eof)
-    (Error (satisfy_fail (pos 1:1)))
-    (Error (satisfy_fail (pos 1:1)))
-    (Error (satisfy_fail (pos 1:1)))
-    (Error (satisfy_fail (pos 1:2)))
+    (Error ((chomp_error satisfy_eof) (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token LCURLY at 1:1") (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token LCURLY at 1:1") (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token LANGLE at 1:1") (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token RPAREN at 1:2") (contexts ())))
     |}]
 ;;
 

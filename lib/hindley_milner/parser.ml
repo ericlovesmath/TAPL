@@ -81,9 +81,9 @@ let%expect_test "ty parse tests" =
   test "'nat";
   [%expect
     {|
-    (Error satisfy_eof)
-    (Error (satisfy_fail (pos 1:2)))
-    (Error (satisfy_fail (pos 1:1)))
+    (Error ((chomp_error satisfy_eof) (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token RPAREN at 1:2") (contexts ())))
+    (Error ((chomp_error "satisfy_fail on token TICK at 1:1") (contexts ())))
     |}]
 ;;
 

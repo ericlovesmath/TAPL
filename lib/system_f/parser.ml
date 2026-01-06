@@ -137,14 +137,22 @@ let%expect_test "ty parse tests" =
   test "()";
   [%expect
     {|
-    (Error (ty (ty_forall (satisfy_fail (pos 1:10)))))
     (Error
-     (ty (between (ty (ty_arrow (ty (ty_forall (satisfy_fail (pos 1:16)))))))))
+     ((chomp_error "satisfy_fail on token NAT at 1:10")
+      (contexts ("ty_forall at 1:1" "ty at 1:1"))))
     (Error
-     (ty
-      (between
-       (ty (ty_arrow (ty (ty_exists (ident (satisfy_map_fail (pos 1:15))))))))))
-    (Error (ty (between (ty_ref (satisfy_fail (pos 1:2))))))
+     ((chomp_error "satisfy_fail on token ARROW at 1:16")
+      (contexts
+       ("ty_forall at 1:7" "ty at 1:7" "ty_arrow at 1:4" "ty at 1:2"
+        "between at 1:1" "ty at 1:1"))))
+    (Error
+     ((chomp_error satisfy_map_fail)
+      (contexts
+       ("ident at 1:15" "ty_exists at 1:7" "ty at 1:7" "ty_arrow at 1:4"
+        "ty at 1:2" "between at 1:1" "ty at 1:1"))))
+    (Error
+     ((chomp_error "satisfy_fail on token RPAREN at 1:2")
+      (contexts ("ty_ref at 1:2" "between at 1:1" "ty at 1:1"))))
     |}]
 ;;
 

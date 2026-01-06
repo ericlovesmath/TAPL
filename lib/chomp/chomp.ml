@@ -5,16 +5,40 @@ module Lexer = Lexer
 module Make (M : Parsable) : Parser with type token = M.token and type pos = M.pos =
 struct
   include M
-  (* TODO: Fail and Fatal should track location separately *)
 
   module Maybe = struct
+    type error_info =
+      { message : string
+      ; found : (token * pos) option
+      ; contexts : (string * pos option) list
+      }
+
+    let sexp_of_error_info { message; found; contexts } =
+      let chomp_error =
+        match found with
+        | None -> message
+        | Some (token, pos) ->
+          let token = Sexplib.Sexp.to_string_hum (M.sexp_of_token token) in
+          let pos = Sexplib.Sexp.to_string_hum (M.sexp_of_pos pos) in
+          [%string "%{message} on token %{token} at %{pos}"]
+      in
+      let string_of_context = function
+        | s, None -> s
+        | s, Some pos ->
+          let pos = Sexp.to_string_hum (M.sexp_of_pos (pos : pos)) in
+          [%string "%{s} at %{pos}"]
+      in
+      let contexts = List.rev (List.map ~f:string_of_context contexts) in
+      [%message (chomp_error : string) (contexts : string list)]
+    ;;
+
     type 'a t =
       | Success of 'a
-      | Fail of Error.t
-      | Fatal of Error.t
+      | Fail of error_info
+      | Fatal of error_info
 
     let to_or_error = function
-      | Fail e | Fatal e -> Error e
+      | Fail e | Fatal e -> Error (Error.of_lazy_sexp (lazy (sexp_of_error_info e)))
       | Success x -> Ok x
     ;;
 
@@ -113,27 +137,23 @@ struct
          | Fail e' -> Fail e')
     ;;
 
-    let ( <?> ) p tag =
-      fun st ->
-      match p st with
-      | Success res -> Success res
-      | Fatal _ -> Fatal (Error.of_string tag)
-      | Fail _ -> Fail (Error.of_string tag)
-    ;;
+    let pos_of_stream st = Option.map ~f:(fun ((_, pos), _) -> pos) (Sequence.next st)
 
     let ( <??> ) p tag =
       fun st ->
       match p st with
       | Success res -> Success res
-      | Fatal e -> Fatal (Error.tag e ~tag)
-      | Fail e -> Fail (Error.tag e ~tag)
+      | Fatal e -> Fatal { e with contexts = (tag, pos_of_stream st) :: e.contexts }
+      | Fail e -> Fail { e with contexts = (tag, pos_of_stream st) :: e.contexts }
     ;;
   end
 
   open Let_syntax
   open Infix_syntax
 
-  let fail ~pos msg = Fail (Error.of_lazy_sexp (lazy [%message msg (pos : pos)]))
+  let fail ?pos ?tok message =
+    Fail { message; found = Option.both tok pos; contexts = [] }
+  ;;
 
   let commit p =
     fun st ->
@@ -145,22 +165,22 @@ struct
   let satisfy (pred : token -> bool) : token t =
     fun st ->
     match Sequence.next st with
-    | Some ((c, pos), st') ->
-      if pred c then Success (c, st') else fail ~pos "satisfy_fail"
-    | None -> Fail (Error.of_string "satisfy_eof")
+    | Some ((tok, pos), st') ->
+      if pred tok then Success (tok, st') else fail ~pos ~tok "satisfy_fail"
+    | None -> fail "satisfy_eof"
   ;;
 
   let peek : token t =
     fun st ->
     match Sequence.next st with
-    | None -> Fail (Error.of_string "peek_eof")
     | Some ((c, _), _) -> Success (c, st)
+    | None -> fail "peek_eof"
   ;;
 
   let satisfy_map (pred : token -> 'a option) : 'a t =
     fun st ->
     match Sequence.next st with
-    | None -> Fail (Error.of_string "satisfy_map_eof")
+    | None -> fail "satisfy_map_eof"
     | Some ((c, pos), st') ->
       (match pred c with
        | Some c -> Success (c, st')
@@ -182,6 +202,6 @@ struct
   ;;
 
   let tok t = satisfy (equal_token t)
-  let fail msg = Fn.const (Fail (Error.of_string msg))
-  let fatal msg = Fn.const (Fatal (Error.of_string msg))
+  let fail message = Fn.const (Fail { message; found = None; contexts = [] })
+  let fatal message = Fn.const (Fatal { message; found = None; contexts = [] })
 end
