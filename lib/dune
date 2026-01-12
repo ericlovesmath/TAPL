@@ -10,4 +10,5 @@
    featherweight_java
    recursive_types
    hindley_milner
-   system_f))
+   system_f
+   f_sub))

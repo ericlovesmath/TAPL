@@ -55,6 +55,7 @@ module Featherweight_java_repl = Make (Featherweight_java)
 module Recursive_types_repl = Make (Recursive_types)
 module Hindley_milner_repl = Make (Hindley_milner)
 module System_f_repl = Make (System_f)
+module F_sub_repl = Make (F_sub)
 
 let command =
   Command.basic
@@ -71,6 +72,7 @@ let command =
        | "rec" | "recursive" -> Recursive_types_repl.start ()
        | "hm" | "let" | "letpoly" -> Hindley_milner_repl.start ()
        | "f" | "systemf" | "sf" -> System_f_repl.start ()
+       | "fsub" | "systemfsub" -> F_sub_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 
