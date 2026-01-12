@@ -11,7 +11,9 @@
 
 (maintainers "Eric Lee <me@ericchanlee.com>")
 
-(documentation https://url/to/documentation)
+(documentation https://github.com/ericlovesmath/TAPL)
+
+(license MIT)
 
 (package
  (name TAPL)
