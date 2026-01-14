@@ -55,6 +55,7 @@ type token =
   | FORALL
   | STAR
   | EXISTS
+  | SUBTYPE
   | INT of int
   | BASE of char
   | ID of string
@@ -62,3 +63,4 @@ type token =
 
 val of_string : string -> t
 val lex : t -> (token * pos) list
+val initial_pos : pos

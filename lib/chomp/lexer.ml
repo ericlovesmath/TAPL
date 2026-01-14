@@ -8,6 +8,7 @@ type pos =
   }
 
 let sexp_of_pos { i = _; line; col } = Atom [%string "%{line#Int}:%{col#Int}"]
+let initial_pos = { i = 0; line = 0; col = 0 }
 
 type token =
   | UNIT
@@ -63,6 +64,7 @@ type token =
   | FORALL
   | STAR
   | EXISTS
+  | SUBTYPE
   | INT of int
   | BASE of char
   | ID of string
@@ -124,7 +126,11 @@ let read_lexeme t =
     | ')' -> skip t; RPAREN
     | '{' -> skip t; LCURLY
     | '}' -> skip t; RCURLY
-    | '<' -> skip t; LANGLE
+    | '<' -> (
+        skip t;
+        match peek t with
+        | ':' -> skip t; SUBTYPE
+        | _ -> LANGLE)
     | '>' -> skip t; RANGLE
     | '[' -> skip t; LBRACKET
     | ']' -> skip t; RBRACKET
@@ -247,5 +253,16 @@ let%expect_test "lexer" =
     (LANGLE (ID some) COLON NAT COMMA (ID none) RANGLE)
     (LCURLY (ID x) EQ TRUE COMMA (ID y) EQ (ID v) DOT (INT 0) RCURLY DOT (ID x))
     ((ID v) ASSIGN SUCC SEMI LET (ID x) EQ REF (ID v) IN BANG (ID x))
+    |}];
+  test "class extends super this new return rec";
+  test "'a";
+  test "forall . { *exists n, m }";
+  test "a < b <: c<:d<e";
+  [%expect
+    {|
+    (CLASS EXTENDS SUPER THIS NEW RETURN REC)
+    (TICK (ID a))
+    (FORALL DOT LCURLY STAR EXISTS (ID n) COMMA (ID m) RCURLY)
+    ((ID a) LANGLE (ID b) SUBTYPE (ID c) SUBTYPE (ID d) LANGLE (ID e))
     |}]
 ;;
