@@ -85,8 +85,9 @@ and ty_forall =
   (tok FORALL
    *> commit
         (let%bind v = ident_p in
+         let%bind ty_sub = tok SUBTYPE *> ty_p <|> return TyTop in
          let%bind ty = tok DOT *> ty_p in
-         return (TyForall (v, ty)))
+         return (TyForall (v, ty_sub, ty)))
    <??> "ty_forall")
     st
 
@@ -96,8 +97,9 @@ and ty_exists =
    *> tok EXISTS
    *> commit
         (let%bind v = ident_p in
+         let%bind ty_sub = tok SUBTYPE *> ty_p <|> return TyTop in
          let%bind ty = tok COMMA *> ty_p <* tok RCURLY in
-         return (TyExists (v, ty)))
+         return (TyExists (v, ty_sub, ty)))
    <??> "ty_exists")
     st
 ;;
@@ -119,7 +121,9 @@ let%expect_test "ty parse tests" =
   test "A -> (X -> nat) -> bool";
   test "(A -> X) -> (nat -> bool)";
   test "forall X . X";
+  test "forall X <: (nat -> F) . X";
   test "{exists X, X -> bool}";
+  test "{exists X <: T, X -> bool}";
   [%expect
     {|
     (Ok A)
@@ -129,8 +133,10 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok (A -> ((X -> nat) -> bool)))
     (Ok ((A -> X) -> (nat -> bool)))
-    (Ok (forall X . X))
-    (Ok ({ exists X , (X -> bool) }))
+    (Ok (forall X <: top . X))
+    (Ok (forall X <: (nat -> F) . X))
+    (Ok ({ exists X <: top , (X -> bool) }))
+    (Ok ({ exists X <: T , (X -> bool) }))
     |}];
   test "forall X nat";
   test "(X -> forall X -> X)";
@@ -288,8 +294,9 @@ and t_ty_abs_p =
   (tok FUN
    *> commit
         (let%bind v = ident_p in
+         let%bind ty_sub = tok SUBTYPE *> ty_p <|> return TyTop in
          let%bind t = tok DOT *> t_p in
-         return (ETyAbs (v, t)))
+         return (ETyAbs (v, ty_sub, t)))
    <??> "t_ty_abs")
     st
 
@@ -361,12 +368,14 @@ let%expect_test "t parse tests" =
     (Ok (fun x : bool -> x))
     |}];
   test "fun x . id";
+  test "fun x <: (top -> top) . id";
   test "{*int, term} as bool";
   test "let {ty, v} = Z in S Z";
   test "id [bool]";
   [%expect
     {|
-    (Ok (fun x . id))
+    (Ok (fun x <: top . id))
+    (Ok (fun x <: (top -> top) . id))
     (Ok ({* int , term } as bool))
     (Ok (let { ty , v } = Z in (S Z)))
     (Ok (id [ bool ]))
