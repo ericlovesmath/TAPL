@@ -101,6 +101,55 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
+let rec ( <: ) (ty : ty_nameless) (ty' : ty_nameless) =
+  let is_subtype_fields r r' =
+    List.for_all r' ~f:(fun (l, ty') ->
+      match List.Assoc.find r l ~equal:String.equal with
+      | Some ty -> ty <: ty'
+      | None -> false)
+  in
+  if equal_ty_nameless ty ty'
+  then true
+  else (
+    (* TODO: How is ForAll and Exists handled here? *)
+    match ty, ty' with
+    | _, UTyTop -> true
+    | UTyBool, UTyNat -> true
+    | UTyTuple ts, UTyTuple ts' ->
+      (match List.for_all2 ts ts' ~f:( <: ) with
+       | Ok true -> true
+       | Ok false | Unequal_lengths -> false)
+    | UTyRecord r, UTyRecord r' -> is_subtype_fields r r'
+    | UTyArrow (a, b), UTyArrow (a', b') -> a' <: a && b <: b'
+    | UTyRef t, UTyRef t' -> t <: t' && t' <: t
+    | _ -> false)
+;;
+
+let rec join (ty : ty_nameless) (ty' : ty_nameless) =
+  if ty <: ty'
+  then ty'
+  else if ty' <: ty
+  then ty
+  else (
+    match ty, ty' with
+    (* TODO: How is ForAll and Exists handled here? *)
+    | UTyRecord r, UTyRecord r' ->
+      let r'' =
+        List.filter_map r' ~f:(fun (l, ty) ->
+          let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
+          l, join ty ty')
+      in
+      if List.is_empty r'' then UTyTop else UTyRecord r''
+    | UTyTuple ts, UTyTuple ts' ->
+      (match List.map2 ts ts' ~f:join with
+       | Ok ts'' -> UTyTuple ts''
+       | Unequal_lengths -> UTyTop)
+    | UTyArrow (a, b), UTyArrow (a', b') -> UTyArrow (join a a', join b b')
+    | UTyRef t, UTyRef t' -> UTyRef (join t t')
+    | _ -> UTyTop)
+;;
+
+(* TODO: Fix [ty_ctx] to have the subtyping info *)
 let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
   : ty_nameless Or_error.t
   =
@@ -142,22 +191,17 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | _ -> error_s [%message "expected record to project from" (t : t)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx ty_ctx t in
-    if equal_ty_nameless ty_t UTyUnit
+    if ty_t <: UTyUnit
     then type_of ctx ty_ctx t'
     else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty_nameless)]
   | EIf (c, t, f) ->
     let%bind ty_c = type_of ctx ty_ctx c in
-    if not (equal_ty_nameless ty_c UTyBool)
-    then error_s [%message "[if] condition is not TyBool" (ty_c : ty_nameless)]
+    if not (ty_c <: UTyBool)
+    then error_s [%message "[if] cond doesn't subsume to TyBool" (ty_c : ty_nameless)]
     else (
       let%bind ty_t = type_of ctx ty_ctx t in
       let%bind ty_f = type_of ctx ty_ctx f in
-      if not (equal_ty_nameless ty_t ty_f)
-      then
-        error_s
-          [%message
-            "[if] branches have unequal types" (ty_t : ty_nameless) (ty_f : ty_nameless)]
-      else Ok ty_t)
+      Ok (join ty_t ty_f))
   | ELet (v, b, t) ->
     let%bind ty_b = type_of ctx ty_ctx b in
     let ctx = Map.set ctx ~key:v ~data:ty_b in
@@ -176,27 +220,29 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
     (match ty_f with
      | UTyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx ty_ctx x in
-       if equal_ty_nameless ty_arg ty_x
+       if ty_x <: ty_arg
        then Ok ty_body
        else
          error_s
            [%message
              "arg can't be applied to func" (ty_f : ty_nameless) (ty_x : ty_nameless)]
-     | _ ->
-       error_s [%message "attempting to apply to non-arrow type" (ty_f : ty_nameless)])
+     | _ -> error_s [%message "can't to apply to non-arrow type" (ty_f : ty_nameless)])
   | EZero -> Ok UTyNat
   | ESucc t ->
-    (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyNat
-     | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty_nameless)])
+    let%bind ty_t = type_of ctx ty_ctx t in
+    if ty_t <: UTyNat
+    then Ok UTyNat
+    else error_s [%message "expected succ to take nat" (ty_t : ty_nameless)]
   | EPred t ->
-    (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyNat
-     | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty_nameless)])
+    let%bind ty_t = type_of ctx ty_ctx t in
+    if ty_t <: UTyNat
+    then Ok UTyNat
+    else error_s [%message "expected pred to take nat" (ty_t : ty_nameless)]
   | EIsZero t ->
-    (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyBool
-     | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty_nameless)])
+    let%bind ty_t = type_of ctx ty_ctx t in
+    if ty_t <: UTyNat
+    then Ok UTyNat
+    else error_s [%message "expected iszero to take nat" (ty_t : ty_nameless)]
   | ERef t ->
     let%map ty = type_of ctx ty_ctx t in
     UTyRef ty
@@ -208,7 +254,7 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
     (match Map.find ctx v with
      | Some (UTyRef ty_v) ->
        let%bind ty_t = type_of ctx ty_ctx t in
-       if equal_ty_nameless ty_v ty_t
+       if ty_t <: ty_v
        then Ok UTyUnit
        else
          error_s
@@ -217,6 +263,7 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty_nameless)]
      | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
   | ETyAbs (ty_var, t) ->
+    (* TODO: ETyAbs Case *)
     let ctx' = Map.map ctx ~f:(shift 1) in
     let ty_ctx' = ty_var :: ty_ctx in
     let%map ty_t = type_of ctx' ty_ctx' t in
@@ -225,9 +272,18 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
     let%bind ty_t = type_of ctx ty_ctx t in
     let%bind ty_arg = remove_names ty_ctx ty_arg in
     (match ty_t with
-     | UTyForall ty_body -> Ok (subst_top ty_arg ty_body)
+     | UTyForall (ty_sub, ty_body) ->
+       if ty_arg <: ty_sub
+       then Ok (subst_top ty_arg ty_body)
+       else
+         error_s
+           [%message
+             "invalid subtype in type application"
+               (ty_arg : ty_nameless)
+               (ty_sub : ty_nameless)]
      | _ -> error_s [%message "expected universal type" (ty_t : ty_nameless)])
   | EPack (ty_real, t, ty_package) ->
+    (* TODO: EPack Case *)
     let%bind ty_real = remove_names ty_ctx ty_real in
     let%bind ty_package = remove_names ty_ctx ty_package in
     (match ty_package with
@@ -247,6 +303,7 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
          [%message
            "pack annotation must be an existential type" (ty_package : ty_nameless)])
   | EUnpack (ty_v, t_v, t_package, t_body) ->
+    (* TODO: EUnpack Case *)
     let%bind ty_pkg = type_of ctx ty_ctx t_package in
     (match ty_pkg with
      | UTyExists ex_body ->

@@ -26,7 +26,9 @@ type ty_nameless =
   | UTyArrow of ty_nameless * ty_nameless
   | UTyRef of ty_nameless
   | UTyForall of ty_nameless * ty_nameless
-  | UTyExists of ty_nameless * ty_nameless (* TODO: TyBot *)
+  | UTyExists of ty_nameless * ty_nameless
+(* TODO: TyBot *)
+(* TODO: TyVariant *)
 [@@deriving equal]
 
 type t =
