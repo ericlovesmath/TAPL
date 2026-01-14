@@ -33,7 +33,7 @@ let remove_names (t : t) : General_interpreter.t =
     | ERef t -> URef (aux ctx t)
     | EDeref t -> UDeref (aux ctx t)
     | EAssign (v, t) -> UAssign (find ctx v, aux ctx t)
-    | ETyAbs (_, t) -> aux ctx t
+    | ETyAbs (_, _, t) -> aux ctx t
     | ETyApp (t, _) -> aux ctx t
     | EPack (_, t, _) -> aux ctx t
     | EUnpack (_, v, b, t) -> aux ctx (ELet (v, b, t))

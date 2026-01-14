@@ -40,6 +40,7 @@ and ty_atom_p =
 and ty_singles_p =
   satisfy_map (function
     | UNITTY -> Some TyUnit
+    | TOP -> Some TyTop
     | BOOL -> Some TyBool
     | NAT -> Some TyNat
     | ID s -> Some (TyVar s)

@@ -13,6 +13,7 @@ let find (ctx : string list) (v : string) : int Or_error.t =
 let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
   let open Or_error.Let_syntax in
   match ty with
+  | TyTop -> Ok UTyTop
   | TyUnit -> Ok UTyUnit
   | TyBool -> Ok UTyBool
   | TyNat -> Ok UTyNat
@@ -35,16 +36,19 @@ let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
   | TyRef ty ->
     let%map ty = remove_names ctx ty in
     UTyRef ty
-  | TyForall (v, ty) ->
-    let%map ty = remove_names (v :: ctx) ty in
-    UTyForall ty
-  | TyExists (v, ty) ->
-    let%map ty = remove_names (v :: ctx) ty in
-    UTyExists ty
+  | TyForall (v, ty_sub, ty) ->
+    let%bind ty_sub = remove_names ctx ty_sub in
+    let%bind ty = remove_names (v :: ctx) ty in
+    return (UTyForall (ty_sub, ty))
+  | TyExists (v, ty_sub, ty) ->
+    let%bind ty_sub = remove_names ctx ty_sub in
+    let%bind ty = remove_names (v :: ctx) ty in
+    return (UTyExists (ty_sub, ty))
 ;;
 
 let shift (d : int) (ty : ty_nameless) =
   let rec walk (c : int) = function
+    | UTyTop -> UTyTop
     | UTyUnit -> UTyUnit
     | UTyBool -> UTyBool
     | UTyNat -> UTyNat
@@ -53,14 +57,15 @@ let shift (d : int) (ty : ty_nameless) =
     | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
     | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall ty -> UTyForall (walk (c + 1) ty)
-    | UTyExists ty -> UTyExists (walk (c + 1) ty)
+    | UTyForall (ty_sub, ty) -> UTyForall (walk c ty_sub, walk (c + 1) ty)
+    | UTyExists (ty_sub, ty) -> UTyExists (walk c ty_sub, walk (c + 1) ty)
   in
   walk 0 ty
 ;;
 
 let subst (j : int) (s : ty_nameless) (ty : ty_nameless) =
   let rec walk (c : int) = function
+    | UTyTop -> UTyTop
     | UTyUnit -> UTyUnit
     | UTyBool -> UTyBool
     | UTyNat -> UTyNat
@@ -69,8 +74,8 @@ let subst (j : int) (s : ty_nameless) (ty : ty_nameless) =
     | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
     | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall ty -> UTyForall (walk (c + 1) ty)
-    | UTyExists ty -> UTyExists (walk (c + 1) ty)
+    | UTyForall (ty_sub, ty) -> UTyForall (walk c ty_sub, walk (c + 1) ty)
+    | UTyExists (ty_sub, ty) -> UTyExists (walk c ty_sub, walk (c + 1) ty)
   in
   walk 0 ty
 ;;
@@ -79,13 +84,13 @@ let subst_top (b : ty_nameless) (t : ty_nameless) = shift (-1) (subst 0 (shift 1
 
 let is_free (ty : ty_nameless) : bool =
   let rec aux depth = function
-    | UTyUnit | UTyBool | UTyNat -> false
+    | UTyTop | UTyUnit | UTyBool | UTyNat -> false
     | UTyVar k -> Int.equal k depth
     | UTyTuple ts -> List.exists ts ~f:(aux depth)
     | UTyRecord r -> List.exists r ~f:(fun (_, t) -> aux depth t)
     | UTyArrow (l, r) -> aux depth l || aux depth r
     | UTyRef t -> aux depth t
-    | UTyForall t | UTyExists t -> aux (depth + 1) t
+    | UTyForall (t, t') | UTyExists (t, t') -> aux (depth + 1) t || aux (depth + 1) t'
   in
   aux 0 ty
 ;;
@@ -269,6 +274,7 @@ let rename_tyvars (ty : ty_nameless) : ty =
   in
   let rec aux (env : string list) (t : ty_nameless) : ty =
     match t with
+    | UTyTop -> TyTop
     | UTyUnit -> TyUnit
     | UTyBool -> TyBool
     | UTyNat -> TyNat
@@ -277,12 +283,12 @@ let rename_tyvars (ty : ty_nameless) : ty =
     | UTyRecord fs -> TyRecord (List.map fs ~f:(fun (l, ty) -> l, aux env ty))
     | UTyArrow (l, r) -> TyArrow (aux env l, aux env r)
     | UTyRef ty -> TyRef (aux env ty)
-    | UTyForall body ->
+    | UTyForall (ty_sub, ty) ->
       let v = gensym () in
-      TyForall (v, aux (v :: env) body)
-    | UTyExists body ->
+      TyForall (v, aux env ty_sub, aux (v :: env) ty)
+    | UTyExists (ty_sub, ty) ->
       let v = gensym () in
-      TyExists (v, aux (v :: env) body)
+      TyExists (v, aux env ty_sub, aux (v :: env) ty)
   in
   aux [] ty
 ;;

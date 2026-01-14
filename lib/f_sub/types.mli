@@ -1,4 +1,5 @@
 type ty =
+  | TyTop
   | TyVar of string
   | TyUnit
   | TyBool
@@ -7,11 +8,14 @@ type ty =
   | TyRecord of (string * ty) list
   | TyArrow of ty * ty
   | TyRef of ty
-  | TyForall of string * ty
-  | TyExists of string * ty
+  (* ∀X <: T . T *)
+  | TyForall of string * ty * ty
+  (* { ∃X <: T, T } *)
+  | TyExists of string * ty * ty
 [@@deriving sexp_of, equal]
 
 type ty_nameless =
+  | UTyTop
   | UTyVar of int
   | UTyUnit
   | UTyBool
@@ -20,8 +24,8 @@ type ty_nameless =
   | UTyRecord of (string * ty_nameless) list
   | UTyArrow of ty_nameless * ty_nameless
   | UTyRef of ty_nameless
-  | UTyForall of ty_nameless
-  | UTyExists of ty_nameless
+  | UTyForall of ty_nameless * ty_nameless
+  | UTyExists of ty_nameless * ty_nameless
 [@@deriving sexp_of, equal]
 
 type t =
@@ -45,7 +49,8 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
-  | ETyAbs of string * t
+  (* λX <: T . t *)
+  | ETyAbs of string * ty * t
   | ETyApp of t * ty
   | EPack of ty * t * ty
   | EUnpack of string * string * t * t
