@@ -29,7 +29,7 @@ let rec ( <: ) (ty : ty) (ty' : ty) =
     | TyVariant v, TyVariant v' ->
       (* NOTE: The switch of [v] and [v'] is intentional *)
       is_subtype_fields v' v
-    | TyArrow (a, b), TyArrow (a', b') -> a <: a' && b <: b'
+    | TyArrow (a, b), TyArrow (a', b') -> a' <: a && b <: b'
     | TyRef t, TyRef t' -> t <: t' && t' <: t
     | _ -> false)
 ;;
