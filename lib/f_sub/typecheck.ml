@@ -1,16 +1,18 @@
 open Core
 open Types
 
-let find (ctx : string list) (v : string) : int Or_error.t =
+let find (ctx : (string * ty_nameless) list) (v : string) : int Or_error.t =
   let rec find' acc = function
-    | [] -> error_s [%message "failed to find variable" v (ctx : string list)]
-    | h :: _ when String.equal h v -> Ok acc
+    | [] -> error_s [%message "failed to find" v (ctx : (string * ty_nameless) list)]
+    | (h, _) :: _ when String.equal h v -> Ok acc
     | _ :: t -> find' (acc + 1) t
   in
   find' 0 ctx
 ;;
 
-let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
+let rec remove_names (ctx : (string * ty_nameless) list) (ty : ty)
+  : ty_nameless Or_error.t
+  =
   let open Or_error.Let_syntax in
   match ty with
   | TyTop -> Ok UTyTop
@@ -38,11 +40,11 @@ let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
     UTyRef ty
   | TyForall (v, ty_sub, ty) ->
     let%bind ty_sub = remove_names ctx ty_sub in
-    let%bind ty = remove_names (v :: ctx) ty in
+    let%bind ty = remove_names ((v, ty_sub) :: ctx) ty in
     return (UTyForall (ty_sub, ty))
   | TyExists (v, ty_sub, ty) ->
     let%bind ty_sub = remove_names ctx ty_sub in
-    let%bind ty = remove_names (v :: ctx) ty in
+    let%bind ty = remove_names ((v, ty_sub) :: ctx) ty in
     return (UTyExists (ty_sub, ty))
 ;;
 
@@ -111,7 +113,6 @@ let rec ( <: ) (ty : ty_nameless) (ty' : ty_nameless) =
   if equal_ty_nameless ty ty'
   then true
   else (
-    (* TODO: How is ForAll and Exists handled here? *)
     match ty, ty' with
     | _, UTyTop -> true
     | UTyBool, UTyNat -> true
@@ -122,6 +123,9 @@ let rec ( <: ) (ty : ty_nameless) (ty' : ty_nameless) =
     | UTyRecord r, UTyRecord r' -> is_subtype_fields r r'
     | UTyArrow (a, b), UTyArrow (a', b') -> a' <: a && b <: b'
     | UTyRef t, UTyRef t' -> t <: t' && t' <: t
+    (* NOTE: Using Kernel F-sub *)
+    | UTyForall (s1, t1), UTyForall (s2, t2) -> equal_ty_nameless s1 s2 && t1 <: t2
+    | UTyExists (s1, t1), UTyExists (s2, t2) -> equal_ty_nameless s1 s2 && t1 <: t2
     | _ -> false)
 ;;
 
@@ -132,7 +136,6 @@ let rec join (ty : ty_nameless) (ty' : ty_nameless) =
   then ty
   else (
     match ty, ty' with
-    (* TODO: How is ForAll and Exists handled here? *)
     | UTyRecord r, UTyRecord r' ->
       let r'' =
         List.filter_map r' ~f:(fun (l, ty) ->
@@ -144,13 +147,21 @@ let rec join (ty : ty_nameless) (ty' : ty_nameless) =
       (match List.map2 ts ts' ~f:join with
        | Ok ts'' -> UTyTuple ts''
        | Unequal_lengths -> UTyTop)
-    | UTyArrow (a, b), UTyArrow (a', b') -> UTyArrow (join a a', join b b')
-    | UTyRef t, UTyRef t' -> UTyRef (join t t')
+    | UTyArrow (a, b), UTyArrow (a', b') ->
+      (* NOTE: Contravariant on input, only join if inputs are compatible *)
+      if equal_ty_nameless a a' then UTyArrow (a, join b b') else UTyTop
+    | UTyRef t, UTyRef t' -> if equal_ty_nameless t t' then UTyRef t else UTyTop
+    | UTyForall (s1, t1), UTyForall (s2, t2) ->
+      if equal_ty_nameless s1 s2 then UTyForall (s1, join t1 t2) else UTyTop
+    | UTyExists (s1, t1), UTyExists (s2, t2) ->
+      if equal_ty_nameless s1 s2 then UTyExists (s1, join t1 t2) else UTyTop
     | _ -> UTyTop)
 ;;
 
-(* TODO: Fix [ty_ctx] to have the subtyping info *)
-let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
+let rec type_of
+          (ctx : ty_nameless String.Map.t)
+          (ty_ctx : (string * ty_nameless) list)
+          (t : t)
   : ty_nameless Or_error.t
   =
   let open Or_error.Let_syntax in
@@ -262,12 +273,12 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
              "assigning to ref of wrong type" (ty_v : ty_nameless) (ty_t : ty_nameless)]
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty_nameless)]
      | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
-  | ETyAbs (ty_var, t) ->
-    (* TODO: ETyAbs Case *)
+  | ETyAbs (ty_var, ty_sub, t) ->
     let ctx' = Map.map ctx ~f:(shift 1) in
-    let ty_ctx' = ty_var :: ty_ctx in
-    let%map ty_t = type_of ctx' ty_ctx' t in
-    UTyForall ty_t
+    let%bind ty_sub = remove_names ty_ctx ty_sub in
+    let ty_ctx' = (ty_var, ty_sub) :: ty_ctx in
+    let%bind ty_t = type_of ctx' ty_ctx' t in
+    return (UTyForall (ty_sub, ty_t))
   | ETyApp (t, ty_arg) ->
     let%bind ty_t = type_of ctx ty_ctx t in
     let%bind ty_arg = remove_names ty_ctx ty_arg in
@@ -283,39 +294,45 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
                (ty_sub : ty_nameless)]
      | _ -> error_s [%message "expected universal type" (ty_t : ty_nameless)])
   | EPack (ty_real, t, ty_package) ->
-    (* TODO: EPack Case *)
     let%bind ty_real = remove_names ty_ctx ty_real in
     let%bind ty_package = remove_names ty_ctx ty_package in
     (match ty_package with
-     | UTyExists ty_body ->
-       let%bind ty_t = type_of ctx ty_ctx t in
-       let expected_ty = subst_top ty_real ty_body in
-       if equal_ty_nameless ty_t expected_ty
-       then Ok ty_package
-       else
+     | UTyExists (ty_bound, ty_body) ->
+       if not (ty_real <: ty_bound)
+       then
          error_s
            [%message
-             "pack term does not match declared existential type"
-               (ty_t : ty_nameless)
-               (expected_ty : ty_nameless)]
+             "witness type does not satisfy bound"
+               (ty_real : ty_nameless)
+               (ty_bound : ty_nameless)]
+       else (
+         let%bind ty_t = type_of ctx ty_ctx t in
+         let expected_ty = subst_top ty_real ty_body in
+         if ty_t <: expected_ty
+         then Ok ty_package
+         else
+           error_s
+             [%message
+               "pack term does not match declared existential type"
+                 (ty_t : ty_nameless)
+                 (expected_ty : ty_nameless)])
      | _ ->
        error_s
          [%message
            "pack annotation must be an existential type" (ty_package : ty_nameless)])
   | EUnpack (ty_v, t_v, t_package, t_body) ->
-    (* TODO: EUnpack Case *)
     let%bind ty_pkg = type_of ctx ty_ctx t_package in
     (match ty_pkg with
-     | UTyExists ex_body ->
+     | UTyExists (ty_bound, ty_body) ->
        let ctx_shifted = Map.map ctx ~f:(shift 1) in
-       let ctx' = Map.set ctx_shifted ~key:t_v ~data:ex_body in
-       let ty_ctx' = ty_v :: ty_ctx in
-       let%bind result_ty = type_of ctx' ty_ctx' t_body in
-       if is_free result_ty
+       let ctx = Map.set ctx_shifted ~key:t_v ~data:ty_body in
+       let ty_ctx = (ty_v, ty_bound) :: ty_ctx in
+       let%bind ty_res = type_of ctx ty_ctx t_body in
+       if is_free ty_res
        then
          error_s
-           [%message "existential type variable escapes scope" (result_ty : ty_nameless)]
-       else Ok result_ty
+           [%message "existential type variable escapes scope" (ty_res : ty_nameless)]
+       else Ok (shift (-1) ty_res)
      | _ -> error_s [%message "unpack expects existential type" (ty_pkg : ty_nameless)])
 ;;
 
