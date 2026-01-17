@@ -27,8 +27,7 @@ let%expect_test "typechecker tests prior to extending" =
   repl "if (fun (x : bool) -> x) then #t else #f";
   [%expect {| (ty_error ("[if] cond doesn't subsume to TyBool" (ty_c (bool -> bool)))) |}];
   repl "if #t then #t else (fun (x : bool) -> x)";
-  [%expect
-    {| ((ty top) (result #t)) |}];
+  [%expect {| ((ty top) (result #t)) |}];
   repl "y";
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
   let id = "(fun (x : bool) -> x)" in
@@ -137,7 +136,8 @@ let%expect_test "existential types typechecking" =
     {*nat, { a = Z, f = fun (x : nat) -> S x }}
       as { exists X, { a : X, f: X -> X } }
     |};
-  [%expect {|
+  [%expect
+    {|
     ((ty ({ exists A <: top , ({ a : A , f : (A -> A) }) }))
      (result ({ a : Z , f : (abs . (S 0)) })))
     |}];
@@ -181,4 +181,85 @@ let%expect_test "existential types typechecking" =
       (ty_res ({ init : 0 , get : (0 -> nat) , inc : (0 -> 0) }))))
     ((ty nat) (result (S Z)))
     |}]
+;;
+
+let%expect_test "subsumption tests" =
+  repl "(fun (x : { a : nat }) -> x.a) { a = Z, b = S Z }";
+  [%expect {| ((ty nat) (result Z)) |}];
+  repl "(fun (x : top) -> x) (ref #t)";
+  [%expect {| ((ty top) (result 0)) |}];
+  repl "(fun (r : { y : bool, x : bool }) -> { x = r.y, y = r.x }) { x = #t, y = #f }";
+  [%expect {| ((ty ({ x : bool , y : bool })) (result ({ x : #f , y : #t }))) |}];
+  repl
+    {|
+    (fun (r : ref { y : bool, x : bool }) ->
+      r := { x = (!r).y, y = (!r).x })
+    ref { x = #t, y = #f }
+    |};
+  [%expect {| ((ty unit) (result #u)) |}];
+  (* Function Contravariance and Covariance *)
+  let app_f = "fun (f : { x : bool, y : bool } -> bool) -> f { x = #t, y = #f }" in
+  let my_f = "fun (r : { x : bool }) -> r.x" in
+  repl [%string "(%{app_f}) (%{my_f})"];
+  [%expect {| ((ty bool) (result #t)) |}];
+  let app_g = "fun (g : bool -> { x : bool }) -> (g #t).x" in
+  let my_g = "fun (b : bool) -> { x = b, y = Z }" in
+  repl [%string "(%{app_g} %{my_g})"];
+  [%expect {| ((ty bool) (result #t)) |}]
+;;
+
+let%expect_test "join tests" =
+  repl "if #t then { x = Z } else { y = #f }";
+  [%expect {| ((ty top) (result ({ x : Z }))) |}];
+  repl "if #t then { x = Z, y = #f } else { z = #f, x = S Z }";
+  [%expect {| ((ty ({ x : nat })) (result ({ x : Z , y : #f }))) |}]
+;;
+
+let%expect_test "bounded quantification (forall)" =
+  let id_sub = "(fun X <: { a : bool } . fun (x : X) -> x.a)" in
+  repl [%string "(%{id_sub} [{ a : bool, b : nat }]) { a = #t, b = Z }"];
+  [%expect {| ((ty bool) (result #t)) |}];
+  repl [%string "(%{id_sub} [nat]) Z"];
+  [%expect
+    {|
+    (ty_error
+     ("type argument does not satisfy bound" (ty_arg nat)
+      (ty_sub ({ a : bool }))))
+    |}];
+  let id_top = "(fun X . fun (x : X) -> x)" in
+  repl [%string "(%{id_top} [nat]) Z"];
+  [%expect {| ((ty nat) (result Z)) |}]
+;;
+
+let%expect_test "bounded existential types (exists)" =
+  let ty_ex = "{ exists X <: { get : nat }, { state : X } }" in
+  repl
+    [%string
+      {|
+      {*
+        { get : nat, set : nat -> unit },
+        { state = { get = Z, set = fun (n:nat) -> #u } }
+      } as %{ty_ex}
+      |}];
+  [%expect
+    {|
+    ((ty ({ exists A <: ({ get : nat }) , ({ state : A }) }))
+     (result ({ state : ({ get : Z , set : (abs . #u) }) })))
+    |}];
+  repl [%string "{* { other : nat }, { state = { other = Z } } } as %{ty_ex}"];
+  [%expect
+    {|
+    (ty_error
+     ("witness type does not satisfy bound" (ty_real ({ other : nat }))
+      (ty_bound ({ get : nat }))))
+    |}]
+;;
+
+let%expect_test "quantifier subtyping" =
+  repl
+    {|
+    (fun (g : forall X <: {a : bool} . X -> {a:bool}) -> #t)
+    (fun X <: {a : bool} . fun (x : X) -> x)
+    |};
+  [%expect {| ((ty bool) (result #t)) |}]
 ;;

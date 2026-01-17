@@ -103,59 +103,67 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
-let rec ( <: ) (ty : ty_nameless) (ty' : ty_nameless) =
-  let is_subtype_fields r r' =
-    List.for_all r' ~f:(fun (l, ty') ->
-      match List.Assoc.find r l ~equal:String.equal with
-      | Some ty -> ty <: ty'
-      | None -> false)
-  in
+let rec expose (ctx : (string * ty_nameless) list) (ty : ty_nameless) : ty_nameless =
+  match ty with
+  | UTyVar i ->
+    (match List.nth ctx i with
+     | Some (_, bound) -> expose ctx (shift (i + 1) bound)
+     | None -> ty)
+  | _ -> ty
+;;
+
+let rec subtype (ctx : (string * ty_nameless) list) (ty : ty_nameless) (ty' : ty_nameless)
+  =
   if equal_ty_nameless ty ty'
   then true
   else (
     match ty, ty' with
     | _, UTyTop -> true
-    | UTyBool, UTyNat -> true
+    | UTyVar i, _ ->
+      let _, bound = List.nth_exn ctx i in
+      subtype ctx (shift (i + 1) bound) ty'
     | UTyTuple ts, UTyTuple ts' ->
-      (match List.for_all2 ts ts' ~f:( <: ) with
-       | Ok true -> true
-       | Ok false | Unequal_lengths -> false)
-    | UTyRecord r, UTyRecord r' -> is_subtype_fields r r'
-    | UTyArrow (a, b), UTyArrow (a', b') -> a' <: a && b <: b'
-    | UTyRef t, UTyRef t' -> t <: t' && t' <: t
-    (* NOTE: Using Kernel F-sub *)
-    | UTyForall (s1, t1), UTyForall (s2, t2) -> equal_ty_nameless s1 s2 && t1 <: t2
-    | UTyExists (s1, t1), UTyExists (s2, t2) -> equal_ty_nameless s1 s2 && t1 <: t2
+      (match List.for_all2 ts ts' ~f:(subtype ctx) with
+       | Ok result -> result
+       | Unequal_lengths -> false)
+    | UTyRecord r, UTyRecord r' ->
+      List.for_all r' ~f:(fun (l, ty_field') ->
+        match List.Assoc.find r l ~equal:String.equal with
+        | Some ty_field -> subtype ctx ty_field ty_field'
+        | None -> false)
+    | UTyArrow (a, b), UTyArrow (a', b') -> subtype ctx a' a && subtype ctx b b'
+    | UTyRef t, UTyRef t' -> subtype ctx t t' && subtype ctx t' t
+    | UTyForall (s1, t1), UTyForall (s2, t2) ->
+      equal_ty_nameless s1 s2 && subtype (("", s1) :: ctx) t1 t2
+    | UTyExists (s1, t1), UTyExists (s2, t2) ->
+      equal_ty_nameless s1 s2 && subtype (("", s1) :: ctx) t1 t2
     | _ -> false)
 ;;
 
-let rec join (ty : ty_nameless) (ty' : ty_nameless) =
-  if ty <: ty'
-  then ty'
-  else if ty' <: ty
-  then ty
-  else (
-    match ty, ty' with
-    | UTyRecord r, UTyRecord r' ->
-      let r'' =
-        List.filter_map r' ~f:(fun (l, ty) ->
-          let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
-          l, join ty ty')
-      in
-      if List.is_empty r'' then UTyTop else UTyRecord r''
-    | UTyTuple ts, UTyTuple ts' ->
-      (match List.map2 ts ts' ~f:join with
-       | Ok ts'' -> UTyTuple ts''
-       | Unequal_lengths -> UTyTop)
-    | UTyArrow (a, b), UTyArrow (a', b') ->
-      (* NOTE: Contravariant on input, only join if inputs are compatible *)
-      if equal_ty_nameless a a' then UTyArrow (a, join b b') else UTyTop
-    | UTyRef t, UTyRef t' -> if equal_ty_nameless t t' then UTyRef t else UTyTop
-    | UTyForall (s1, t1), UTyForall (s2, t2) ->
-      if equal_ty_nameless s1 s2 then UTyForall (s1, join t1 t2) else UTyTop
-    | UTyExists (s1, t1), UTyExists (s2, t2) ->
-      if equal_ty_nameless s1 s2 then UTyExists (s1, join t1 t2) else UTyTop
-    | _ -> UTyTop)
+let rec join (ctx : (string * ty_nameless) list) (ty : ty_nameless) (ty' : ty_nameless) =
+  match ty, ty' with
+  | _ when subtype ctx ty ty' -> ty
+  | _ when subtype ctx ty' ty -> ty'
+  | UTyRecord r, UTyRecord r' ->
+    let r'' =
+      List.filter_map r' ~f:(fun (l, ty) ->
+        let%map.Option ty' = List.Assoc.find r l ~equal:String.equal in
+        l, join ctx ty ty')
+    in
+    if List.is_empty r'' then UTyTop else UTyRecord r''
+  | UTyTuple ts, UTyTuple ts' ->
+    (match List.map2 ts ts' ~f:(join ctx) with
+     | Ok ts'' -> UTyTuple ts''
+     | Unequal_lengths -> UTyTop)
+  | UTyArrow (a, b), UTyArrow (a', b') ->
+    (* NOTE: Contravariant on input, only join if inputs are compatible *)
+    if equal_ty_nameless a a' then UTyArrow (a, join ctx b b') else UTyTop
+  | UTyRef t, UTyRef t' -> if equal_ty_nameless t t' then UTyRef t else UTyTop
+  | UTyForall (s1, t1), UTyForall (s2, t2) ->
+    if equal_ty_nameless s1 s2 then UTyForall (s1, join ctx t1 t2) else UTyTop
+  | UTyExists (s1, t1), UTyExists (s2, t2) ->
+    if equal_ty_nameless s1 s2 then UTyExists (s1, join ctx t1 t2) else UTyTop
+  | _ -> UTyTop
 ;;
 
 let rec type_of
@@ -165,6 +173,9 @@ let rec type_of
   : ty_nameless Or_error.t
   =
   let open Or_error.Let_syntax in
+  let ( <: ) = subtype ty_ctx in
+  let join = join ty_ctx in
+  let expose = expose ty_ctx in
   match t with
   | EUnit -> Ok UTyUnit
   | ETrue | EFalse -> Ok UTyBool
@@ -180,7 +191,8 @@ let rec type_of
     let%bind () = assert_unique_fields (List.map ~f:fst fields) in
     Ok (UTyRecord fields)
   | EProjTuple (t, i) ->
-    (match%bind type_of ctx ty_ctx t with
+    let%bind ty = type_of ctx ty_ctx t in
+    (match expose ty with
      | UTyTuple tys ->
        (match List.nth tys i with
         | Some ty -> Ok ty
@@ -190,7 +202,8 @@ let rec type_of
               "tuple projection on invalid index" (tys : ty_nameless list) (i : int)])
      | _ -> error_s [%message "expected tuple to project from" (t : t)])
   | EProjRecord (t, l) ->
-    (match%bind type_of ctx ty_ctx t with
+    let%bind ty = type_of ctx ty_ctx t in
+    (match expose ty with
      | UTyRecord tys ->
        let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
@@ -199,7 +212,8 @@ let rec type_of
           error_s
             [%message
               "record missing field" (tys : (string * ty_nameless) list) (l : string)])
-     | _ -> error_s [%message "expected record to project from" (t : t)])
+     | ty_t ->
+       error_s [%message "expected record to project from" (t : t) (ty_t : ty_nameless)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx ty_ctx t in
     if ty_t <: UTyUnit
@@ -228,7 +242,7 @@ let rec type_of
     return (UTyArrow (ty_v, ty_t))
   | EApp (f, x) ->
     let%bind ty_f = type_of ctx ty_ctx f in
-    (match ty_f with
+    (match expose ty_f with
      | UTyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx ty_ctx x in
        if ty_x <: ty_arg
@@ -274,31 +288,31 @@ let rec type_of
      | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty_nameless)]
      | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
   | ETyAbs (ty_var, ty_sub, t) ->
-    let ctx' = Map.map ctx ~f:(shift 1) in
     let%bind ty_sub = remove_names ty_ctx ty_sub in
+    let ctx' = Map.map ctx ~f:(shift 1) in
     let ty_ctx' = (ty_var, ty_sub) :: ty_ctx in
     let%bind ty_t = type_of ctx' ty_ctx' t in
     return (UTyForall (ty_sub, ty_t))
   | ETyApp (t, ty_arg) ->
     let%bind ty_t = type_of ctx ty_ctx t in
     let%bind ty_arg = remove_names ty_ctx ty_arg in
-    (match ty_t with
+    (match expose ty_t with
      | UTyForall (ty_sub, ty_body) ->
-       if ty_arg <: ty_sub
+       if subtype ty_ctx ty_arg ty_sub
        then Ok (subst_top ty_arg ty_body)
        else
          error_s
            [%message
-             "invalid subtype in type application"
+             "type argument does not satisfy bound"
                (ty_arg : ty_nameless)
                (ty_sub : ty_nameless)]
      | _ -> error_s [%message "expected universal type" (ty_t : ty_nameless)])
   | EPack (ty_real, t, ty_package) ->
     let%bind ty_real = remove_names ty_ctx ty_real in
     let%bind ty_package = remove_names ty_ctx ty_package in
-    (match ty_package with
+    (match expose ty_package with
      | UTyExists (ty_bound, ty_body) ->
-       if not (ty_real <: ty_bound)
+       if not (subtype ty_ctx ty_real ty_bound)
        then
          error_s
            [%message
@@ -308,7 +322,7 @@ let rec type_of
        else (
          let%bind ty_t = type_of ctx ty_ctx t in
          let expected_ty = subst_top ty_real ty_body in
-         if ty_t <: expected_ty
+         if subtype ty_ctx ty_t expected_ty
          then Ok ty_package
          else
            error_s
@@ -322,7 +336,7 @@ let rec type_of
            "pack annotation must be an existential type" (ty_package : ty_nameless)])
   | EUnpack (ty_v, t_v, t_package, t_body) ->
     let%bind ty_pkg = type_of ctx ty_ctx t_package in
-    (match ty_pkg with
+    (match expose ty_pkg with
      | UTyExists (ty_bound, ty_body) ->
        let ctx_shifted = Map.map ctx ~f:(shift 1) in
        let ctx = Map.set ctx_shifted ~key:t_v ~data:ty_body in
