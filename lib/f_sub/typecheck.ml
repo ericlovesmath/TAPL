@@ -1,18 +1,18 @@
 open Core
 open Types
 
-let find (ctx : (string * ty_nameless) list) (v : string) : int Or_error.t =
+type ty_context = (string * ty_nameless) list [@@deriving sexp_of]
+
+let find (ctx : ty_context) (v : string) : int Or_error.t =
   let rec find' acc = function
-    | [] -> error_s [%message "failed to find" v (ctx : (string * ty_nameless) list)]
+    | [] -> error_s [%message "failed to find" v (ctx : ty_context)]
     | (h, _) :: _ when String.equal h v -> Ok acc
     | _ :: t -> find' (acc + 1) t
   in
   find' 0 ctx
 ;;
 
-let rec remove_names (ctx : (string * ty_nameless) list) (ty : ty)
-  : ty_nameless Or_error.t
-  =
+let rec remove_names (ctx : ty_context) (ty : ty) : ty_nameless Or_error.t =
   let open Or_error.Let_syntax in
   match ty with
   | TyTop -> Ok UTyTop
@@ -48,21 +48,24 @@ let rec remove_names (ctx : (string * ty_nameless) list) (ty : ty)
     return (UTyExists (ty_sub, ty))
 ;;
 
-let shift (d : int) (ty : ty_nameless) =
-  let rec walk (c : int) = function
-    | UTyTop -> UTyTop
-    | UTyUnit -> UTyUnit
-    | UTyBool -> UTyBool
-    | UTyNat -> UTyNat
-    | UTyVar i -> UTyVar (if i >= c then i + d else i)
-    | UTyTuple tys -> UTyTuple (List.map ~f:(walk c) tys)
-    | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
+let map_ty f ty =
+  let rec walk c = function
+    | (UTyTop | UTyUnit | UTyBool | UTyNat) as ty -> ty
+    | UTyVar i -> f c i
+    | UTyTuple ts -> UTyTuple (List.map ts ~f:(walk c))
+    | UTyRecord r -> UTyRecord (List.map r ~f:(Tuple2.map_snd ~f:(walk c)))
     | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
     | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall (ty_sub, ty) -> UTyForall (walk c ty_sub, walk (c + 1) ty)
-    | UTyExists (ty_sub, ty) -> UTyExists (walk c ty_sub, walk (c + 1) ty)
+    | UTyForall (s, t) -> UTyForall (walk c s, walk (c + 1) t)
+    | UTyExists (s, t) -> UTyExists (walk c s, walk (c + 1) t)
   in
   walk 0 ty
+;;
+
+let shift (d : int) = map_ty (fun c i -> UTyVar (if i >= c then i + d else i))
+
+let subst (j : int) (s : ty_nameless) =
+  map_ty (fun c i -> if i = j + c then shift c s else UTyVar i)
 ;;
 
 let subst (j : int) (s : ty_nameless) (ty : ty_nameless) =
@@ -103,7 +106,7 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
-let rec expose (ctx : (string * ty_nameless) list) (ty : ty_nameless) : ty_nameless =
+let rec expose (ctx : ty_context) (ty : ty_nameless) : ty_nameless =
   match ty with
   | UTyVar i ->
     (match List.nth ctx i with
@@ -112,35 +115,30 @@ let rec expose (ctx : (string * ty_nameless) list) (ty : ty_nameless) : ty_namel
   | _ -> ty
 ;;
 
-let rec subtype (ctx : (string * ty_nameless) list) (ty : ty_nameless) (ty' : ty_nameless)
-  =
-  if equal_ty_nameless ty ty'
-  then true
-  else (
-    match ty, ty' with
-    | _, UTyTop -> true
-    | UTyVar i, _ ->
-      let _, bound = List.nth_exn ctx i in
-      subtype ctx (shift (i + 1) bound) ty'
-    | UTyTuple ts, UTyTuple ts' ->
-      (match List.for_all2 ts ts' ~f:(subtype ctx) with
-       | Ok result -> result
-       | Unequal_lengths -> false)
-    | UTyRecord r, UTyRecord r' ->
-      List.for_all r' ~f:(fun (l, ty_field') ->
-        match List.Assoc.find r l ~equal:String.equal with
-        | Some ty_field -> subtype ctx ty_field ty_field'
-        | None -> false)
-    | UTyArrow (a, b), UTyArrow (a', b') -> subtype ctx a' a && subtype ctx b b'
-    | UTyRef t, UTyRef t' -> subtype ctx t t' && subtype ctx t' t
-    | UTyForall (s1, t1), UTyForall (s2, t2) ->
-      equal_ty_nameless s1 s2 && subtype (("", s1) :: ctx) t1 t2
-    | UTyExists (s1, t1), UTyExists (s2, t2) ->
-      equal_ty_nameless s1 s2 && subtype (("", s1) :: ctx) t1 t2
-    | _ -> false)
+let rec subtype (ctx : ty_context) (ty : ty_nameless) (ty' : ty_nameless) =
+  match ty, ty' with
+  | _ when equal_ty_nameless ty ty' -> true
+  | _, UTyTop -> true
+  | UTyVar i, _ ->
+    let _, bound = List.nth_exn ctx i in
+    subtype ctx (shift (i + 1) bound) ty'
+  | UTyTuple ts, UTyTuple ts' ->
+    (match List.for_all2 ts ts' ~f:(subtype ctx) with
+     | Ok result -> result
+     | Unequal_lengths -> false)
+  | UTyRecord r, UTyRecord r' ->
+    List.for_all r' ~f:(fun (l, ty_field') ->
+      match List.Assoc.find r l ~equal:String.equal with
+      | Some ty_field -> subtype ctx ty_field ty_field'
+      | None -> false)
+  | UTyArrow (a, b), UTyArrow (a', b') -> subtype ctx a' a && subtype ctx b b'
+  | UTyRef t, UTyRef t' -> subtype ctx t t' && subtype ctx t' t
+  | UTyForall (s1, t1), UTyForall (s2, t2) | UTyExists (s1, t1), UTyExists (s2, t2) ->
+    equal_ty_nameless s1 s2 && subtype (("", s1) :: ctx) t1 t2
+  | _ -> false
 ;;
 
-let rec join (ctx : (string * ty_nameless) list) (ty : ty_nameless) (ty' : ty_nameless) =
+let rec join (ctx : ty_context) (ty : ty_nameless) (ty' : ty_nameless) =
   match ty, ty' with
   | _ when subtype ctx ty ty' -> ty
   | _ when subtype ctx ty' ty -> ty'
@@ -166,10 +164,7 @@ let rec join (ctx : (string * ty_nameless) list) (ty : ty_nameless) (ty' : ty_na
   | _ -> UTyTop
 ;;
 
-let rec type_of
-          (ctx : ty_nameless String.Map.t)
-          (ty_ctx : (string * ty_nameless) list)
-          (t : t)
+let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : ty_context) (t : t)
   : ty_nameless Or_error.t
   =
   let open Or_error.Let_syntax in
@@ -209,9 +204,7 @@ let rec type_of
        (match List.Assoc.find tys l ~equal:String.equal with
         | Some ty -> Ok ty
         | None ->
-          error_s
-            [%message
-              "record missing field" (tys : (string * ty_nameless) list) (l : string)])
+          error_s [%message "record missing field" (tys : ty_context) (l : string)])
      | ty_t ->
        error_s [%message "expected record to project from" (t : t) (ty_t : ty_nameless)])
   | ESeq (t, t') ->
