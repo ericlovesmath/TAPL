@@ -68,23 +68,6 @@ let subst (j : int) (s : ty_nameless) =
   map_ty (fun c i -> if i = j + c then shift c s else UTyVar i)
 ;;
 
-let subst (j : int) (s : ty_nameless) (ty : ty_nameless) =
-  let rec walk (c : int) = function
-    | UTyTop -> UTyTop
-    | UTyUnit -> UTyUnit
-    | UTyBool -> UTyBool
-    | UTyNat -> UTyNat
-    | UTyVar i -> if i = j + c then shift c s else UTyVar i
-    | UTyTuple tys -> UTyTuple (List.map ~f:(walk c) tys)
-    | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
-    | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
-    | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall (ty_sub, ty) -> UTyForall (walk c ty_sub, walk (c + 1) ty)
-    | UTyExists (ty_sub, ty) -> UTyExists (walk c ty_sub, walk (c + 1) ty)
-  in
-  walk 0 ty
-;;
-
 let subst_top (b : ty_nameless) (t : ty_nameless) = shift (-1) (subst 0 (shift 1 b) t)
 
 let is_free (ty : ty_nameless) : bool =
@@ -140,8 +123,15 @@ let rec subtype (ctx : ty_context) (ty : ty_nameless) (ty' : ty_nameless) =
 
 let rec join (ctx : ty_context) (ty : ty_nameless) (ty' : ty_nameless) =
   match ty, ty' with
-  | _ when subtype ctx ty ty' -> ty
-  | _ when subtype ctx ty' ty -> ty'
+  | _ when subtype ctx ty ty' -> ty'
+  | _ when subtype ctx ty' ty -> ty
+  (* NOTE: We don't call [expose] as we want to unwrap one layer at a time up *)
+  | UTyVar i, _ ->
+    let _, bound = List.nth_exn ctx i in
+    join ctx (shift (i + 1) bound) ty'
+  | _, UTyVar i ->
+    let _, bound = List.nth_exn ctx i in
+    join ctx ty (shift (i + 1) bound)
   | UTyRecord r, UTyRecord r' ->
     let r'' =
       List.filter_map r' ~f:(fun (l, ty) ->

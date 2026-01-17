@@ -263,3 +263,25 @@ let%expect_test "quantifier subtyping" =
     |};
   [%expect {| ((ty bool) (result #t)) |}]
 ;;
+
+let%expect_test "type-preserving update" =
+  repl
+    {|
+    ((fun X <: {x : nat, y : nat} . fun (p : X) -> p) [{x : nat, y : nat, color : bool}])
+    { x = Z, y = Z, color = #t}
+    |};
+  [%expect
+    {|
+    ((ty ({ x : nat , y : nat , color : bool }))
+     (result ({ x : Z , y : Z , color : #t })))
+  |}]
+;;
+
+let%expect_test "diamond subtyping" =
+  repl "fun B . fun X <: B . fun Y <: B . fun (x:X) -> fun (y:Y) -> if #t then x else y";
+  [%expect
+    {|
+    ((ty (forall A <: top . (forall B <: A . (forall C <: A . (B -> (C -> A))))))
+     (result (abs . (abs . (if #t then 1 else 0)))))
+    |}]
+;;
