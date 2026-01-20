@@ -11,8 +11,12 @@ homepage: "https://github.com/ericlovesmath/TAPL"
 doc: "https://github.com/ericlovesmath/TAPL"
 bug-reports: "https://github.com/ericlovesmath/TAPL/issues"
 depends: [
-  "dune" {>= "3.17"}
   "ocaml"
+  "dune" {>= "3.17"}
+  "async"
+  "core"
+  "ppx_jane"
+  "ppx_quick_test"
   "odoc" {with-doc}
 ]
 build: [

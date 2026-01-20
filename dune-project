@@ -19,7 +19,13 @@
  (name TAPL)
  (synopsis "Implementation of Types and Programming Languages")
  (description "Implementation of Types and Programming Languages, following the book by Benjamin Pierce")
- (depends ocaml)
+ (depends
+   ocaml
+   dune
+   async
+   core
+   ppx_jane
+   ppx_quick_test)
  (tags
   ("ocaml" "compiler" "types" "programming languages")))
 
