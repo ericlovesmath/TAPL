@@ -1,5 +1,5 @@
 {
-  description = "TAPL Opam nix flake";
+  description = "TAPL opam nix flake";
 
   inputs = {
     opam-nix.url = "github:tweag/opam-nix";
@@ -14,34 +14,47 @@
       # Uses <package>.opam to solve dependencies from
       package = "TAPL";
 
-      # ocaml-version = "*" will let opam solver find a compatible version
-      ocaml-version = "*";
+      # Opam packages used in developer mode
+      devOpamPackagesQuery = {
+        utop = "*";
+        ocaml-lsp-server = "*";
+        ocamlformat = "*";
+        merlin = "*";
+      };
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        };
-
+        pkgs = nixpkgs.legacyPackages.${system};
         on = opam-nix.lib.${system};
 
-        # OCaml Project Scope
-        scope = on.buildDuneProject { } package ./. {
-          ocaml-base-compiler = ocaml-version;
-          ocaml-lsp-server = "*";
-          ocamlformat = "*";
-          utop = "*";
+        # OCaml version can be specified here
+        opamPackagesQuery = devOpamPackagesQuery // {
+          ocaml-base-compiler = "*";
         };
 
+        # OCaml Project Scope
+        scope = on.buildDuneProject { } package ./. opamPackagesQuery;
+
+        # Prevent the ocaml dependencies from leaking into dependent environments
+        overlay = final: prev: {
+          ${package} = prev.${package}.overrideAttrs (_: {
+            doNixSupport = false;
+          });
+        };
+        scope' = scope.overrideScope overlay;
+
+        # Expose OCaml packages defined in [devOpamPackagesQuery] to devshell
+        devOpamPackages = builtins.attrValues (pkgs.lib.getAttrs (builtins.attrNames devOpamPackagesQuery) scope');
+        main = scope'.${package};
+
         # Expose OCaml packages from opam derivation to opencode
-        ocamlPkgs = builtins.filter pkgs.lib.isDerivation (builtins.attrValues scope);
-        ocamlPath = pkgs.lib.makeSearchPath "lib/ocaml/${scope.ocaml-base-compiler.version}/site-lib" ocamlPkgs;
+        opamPackages = builtins.filter pkgs.lib.isDerivation (builtins.attrValues scope');
+        ocamlPath = pkgs.lib.makeSearchPath "lib/ocaml/${scope'.ocaml-base-compiler.version}/site-lib" opamPackages;
 
         opencode-pkg = llm-agents.packages.${system}.opencode;
         jail = jail-nix.lib.init pkgs;
 
-        # Sandboxing Logic
+        # Sandboxing for Opencode using bubblewrap
         makeJailedOpencode = { extraPkgs ? [] } :
           jail "jailed-opencode" opencode-pkg (with jail.combinators; [
             network
@@ -60,7 +73,7 @@
 
             # Inject OCaml tools and common utilities that opencode can use
             (add-pkg-deps (with pkgs; extraPkgs ++ ocamlPkgs ++ [
-                bashInteractive curl wget jq git which
+                bashInteractive curl wget jq which
                 ripgrep gnugrep gawkInteractive ps findutils
                 gzip unzip gnutar diffutils binutils gcc
             ]))
@@ -68,23 +81,23 @@
 
       in
       {
-        legacyPackages = scope;
-        packages.default = scope.${package};
+        legacyPackages = scope';
+        packages.default = main;
 
         devShells = {
           # Shell with opam packages
           default = pkgs.mkShell {
-            inputsFrom = [ scope.${package} ];
+            inputsFrom = [ main ];
             packages = [
-              ocamlPkgs
+              devOpamPackages
             ];
           };
 
           # Shell with jailed opencode agent, nix develop ".#opencode"
           opencode = pkgs.mkShell {
-            inputsFrom = [ scope.${package} ];
+            inputsFrom = [ main ];
             packages = [
-              ocamlPkgs
+              devOpamPackages
               (makeJailedOpencode {})
             ];
           };
