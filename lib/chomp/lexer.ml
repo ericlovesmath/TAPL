@@ -31,6 +31,7 @@ type token =
   | RBRACKET
   | SEMI
   | COLON
+  | DCOLON
   | COMMA
   | IF
   | THEN
@@ -40,6 +41,7 @@ type token =
   | FUN
   | AS
   | BAR
+  | DARROW
   | MATCH
   | WITH
   | LCURLY
@@ -122,7 +124,23 @@ let read_lexeme t =
   let token =
     match peek t with
     | '(' -> skip t; LPAREN
-    | '=' -> skip t; EQ
+    | '=' -> (
+        skip t;
+        match peek t with
+        | '>' ->
+            skip t;
+            DARROW
+        | _ -> EQ)
+    | ':' -> (
+        skip t;
+        match peek t with
+        | ':' ->
+            skip t;
+            DCOLON
+        | '=' ->
+            skip t;
+            ASSIGN
+        | _ -> COLON)
     | ')' -> skip t; RPAREN
     | '{' -> skip t; LCURLY
     | '}' -> skip t; RCURLY
@@ -191,8 +209,6 @@ let read_lexeme t =
     | _ ->
         let s = read_while (fun c -> not Char.(is_alpha c || equal '#' c || is_whitespace c || equal '.' c)) t in
         match s with
-        | ":" -> COLON
-        | ":=" -> ASSIGN
         | "->" -> ARROW
         | _ -> failwith ("invalid token " ^ s)
     in
@@ -241,8 +257,8 @@ let%expect_test "lexer" =
      FALSE)
     ((ID f) (ID x) (ID y) (ID z))
     ((ID f) LPAREN (ID x) (ID y) RPAREN (ID z))
-    (MATCH (ID f) LPAREN (ID x) (ID y) RPAREN (ID z) WITH BAR (ID some) (ID x) EQ
-     RANGLE TRUE BAR (ID none) EQ RANGLE FALSE)
+    (MATCH (ID f) LPAREN (ID x) (ID y) RPAREN (ID z) WITH BAR (ID some) (ID x)
+     DARROW TRUE BAR (ID none) DARROW FALSE)
     ((ID x) AS BOOL)
     (MATCH (ID pos) AS LANGLE (ID p) COLON NAT COMMA (ID end) RANGLE WITH BAR
      (ID p) (ID n) ARROW (ID n) BAR (ID end) ARROW UNIT)
@@ -258,11 +274,13 @@ let%expect_test "lexer" =
   test "'a";
   test "forall . { *exists n, m }";
   test "a < b <: c<:d<e";
+  test ":: => :=";
   [%expect
     {|
     (CLASS EXTENDS SUPER THIS NEW RETURN REC)
     (TICK (ID a))
     (FORALL DOT LCURLY STAR EXISTS (ID n) COMMA (ID m) RCURLY)
     ((ID a) LANGLE (ID b) SUBTYPE (ID c) SUBTYPE (ID d) LANGLE (ID e))
+    (DCOLON DARROW ASSIGN)
     |}]
 ;;

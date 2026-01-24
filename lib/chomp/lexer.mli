@@ -22,6 +22,7 @@ type token =
   | RBRACKET
   | SEMI
   | COLON
+  | DCOLON
   | COMMA
   | IF
   | THEN
@@ -31,6 +32,7 @@ type token =
   | FUN
   | AS
   | BAR
+  | DARROW
   | MATCH
   | WITH
   | LCURLY

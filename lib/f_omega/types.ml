@@ -1,6 +1,11 @@
 open Core
 open Sexplib.Sexp
 
+type kind =
+  | KiStar
+  | KiArrow of kind * kind
+[@@deriving equal, sexp]
+
 type ty =
   | TyVar of string
   | TyUnit
@@ -10,8 +15,10 @@ type ty =
   | TyRecord of (string * ty) list
   | TyArrow of ty * ty
   | TyRef of ty
-  | TyForall of string * ty
-  | TyExists of string * ty
+  | TyForall of string * kind * ty
+  | TyExists of string * kind * ty
+  | TyAbs of string * kind * ty
+  | TyApp of ty * ty
 [@@deriving equal]
 
 type ty_nameless =
@@ -23,8 +30,10 @@ type ty_nameless =
   | UTyRecord of (string * ty_nameless) list
   | UTyArrow of ty_nameless * ty_nameless
   | UTyRef of ty_nameless
-  | UTyForall of ty_nameless
-  | UTyExists of ty_nameless
+  | UTyForall of kind * ty_nameless
+  | UTyExists of kind * ty_nameless
+  | UTyAbs of kind * ty_nameless
+  | UTyApp of ty_nameless * ty_nameless
 [@@deriving equal]
 
 type t =
@@ -48,10 +57,15 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
-  | ETyAbs of string * t
+  | ETyAbs of string * kind * t
   | ETyApp of t * ty
   | EPack of ty * t * ty
   | EUnpack of string * string * t * t
+
+let rec sexp_of_kind = function
+  | KiStar -> Atom "*"
+  | KiArrow (k, k') -> List [ sexp_of_kind k; Atom "=>"; sexp_of_kind k' ]
+;;
 
 let sexp_of_ty ty =
   let rec parse = function
@@ -60,9 +74,22 @@ let sexp_of_ty ty =
     | TyNat -> Atom "nat"
     | TyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
     | TyVar v -> Atom v
-    | TyForall (v, ty) -> List [ Atom "forall"; Atom v; Atom "."; parse ty ]
-    | TyExists (v, ty) ->
-      List [ Atom "{"; Atom "exists"; Atom v; Atom ","; parse ty; Atom "}" ]
+    | TyForall (v, k, ty) ->
+      List [ Atom "forall"; Atom v; Atom "::"; sexp_of_kind k; Atom "."; parse ty ]
+    | TyExists (v, k, ty) ->
+      List
+        [ Atom "{"
+        ; Atom "exists"
+        ; Atom v
+        ; Atom "::"
+        ; sexp_of_kind k
+        ; Atom ","
+        ; parse ty
+        ; Atom "}"
+        ]
+    | TyAbs (v, k, ty) ->
+      List [ Atom "fun"; Atom v; Atom "::"; sexp_of_kind k; Atom "."; parse ty ]
+    | TyApp (a, b) -> List [ parse a; parse b ]
     | TyTuple tys ->
       List
         ([ Atom "{" ]
@@ -88,8 +115,12 @@ let sexp_of_ty_nameless ty =
     | UTyNat -> Atom "nat"
     | UTyArrow (a, b) -> List [ parse a; Atom "->"; parse b ]
     | UTyVar i -> Atom (Int.to_string i)
-    | UTyForall ty -> List [ Atom "forall"; Atom "."; parse ty ]
-    | UTyExists ty -> List [ Atom "{"; Atom "exists"; parse ty; Atom "}" ]
+    | UTyForall (k, ty) ->
+      List [ Atom "forall"; Atom "::"; sexp_of_kind k; Atom "."; parse ty ]
+    | UTyExists (k, ty) ->
+      List [ Atom "{"; Atom "exists"; Atom "::"; sexp_of_kind k; parse ty; Atom "}" ]
+    | UTyAbs (k, ty) -> List [ Atom "fun"; Atom "::"; sexp_of_kind k; Atom "."; parse ty ]
+    | UTyApp (a, b) -> List [ parse a; parse b ]
     | UTyTuple tys ->
       List
         ([ Atom "{" ]
@@ -144,7 +175,8 @@ let sexp_of_t t =
     | ERef t -> List [ Atom "ref"; parse t ]
     | EDeref t -> List [ Atom "!"; parse t ]
     | EAssign (v, t) -> List [ Atom v; Atom ":="; parse t ]
-    | ETyAbs (v, t) -> List [ Atom "fun"; Atom v; Atom "."; parse t ]
+    | ETyAbs (v, k, t) ->
+      List [ Atom "fun"; Atom v; Atom "::"; sexp_of_kind k; Atom "."; parse t ]
     | ETyApp (t, ty) -> List [ parse t; Atom "["; sexp_of_ty ty; Atom "]" ]
     | EPack (ty, t, ty') ->
       List

@@ -1,3 +1,8 @@
+type kind =
+  | KiStar
+  | KiArrow of kind * kind
+[@@deriving equal, sexp]
+
 type ty =
   | TyVar of string
   | TyUnit
@@ -7,8 +12,10 @@ type ty =
   | TyRecord of (string * ty) list
   | TyArrow of ty * ty
   | TyRef of ty
-  | TyForall of string * ty
-  | TyExists of string * ty
+  | TyForall of string * kind * ty
+  | TyExists of string * kind * ty
+  | TyAbs of string * kind * ty
+  | TyApp of ty * ty
 [@@deriving sexp_of, equal]
 
 type ty_nameless =
@@ -20,8 +27,10 @@ type ty_nameless =
   | UTyRecord of (string * ty_nameless) list
   | UTyArrow of ty_nameless * ty_nameless
   | UTyRef of ty_nameless
-  | UTyForall of ty_nameless
-  | UTyExists of ty_nameless
+  | UTyForall of kind * ty_nameless
+  | UTyExists of kind * ty_nameless
+  | UTyAbs of kind * ty_nameless
+  | UTyApp of ty_nameless * ty_nameless
 [@@deriving sexp_of, equal]
 
 type t =
@@ -45,7 +54,7 @@ type t =
   | ERef of t
   | EDeref of t
   | EAssign of string * t
-  | ETyAbs of string * t
+  | ETyAbs of string * kind * t
   | ETyApp of t * ty
   | EPack of ty * t * ty
   | EUnpack of string * string * t * t
