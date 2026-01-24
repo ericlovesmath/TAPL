@@ -233,3 +233,112 @@ let%expect_test "kind errors" =
       (k1 ((* => *) => (* => *))) (t2 bool) (k2 *)))
     |}]
 ;;
+
+let%expect_test "Church Encodings" =
+  let c_bool = "(forall X :: * . X -> X -> X)" in
+  let c_true = "(fun X :: * . fun (t : X) -> fun (f : X) -> t)" in
+  let c_false = "(fun X :: * . fun (t : X) -> fun (f : X) -> f)" in
+  let c_and =
+    [%string
+      "(fun (a : %{c_bool}) -> fun (b : %{c_bool}) -> (a [%{c_bool}] b) %{c_false})"]
+  in
+  repl c_true;
+  repl c_false;
+  repl [%string "(%{c_and} %{c_true} %{c_false})"];
+  [%expect
+    {|
+    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 1))))
+    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 0))))
+  |}];
+  let c_nat_ty = "(forall X :: * . (X -> X) -> X -> X)" in
+  let c_zero = "(fun X :: * . fun (s : X -> X) -> fun (z : X) -> z)" in
+  let c_succ =
+    [%string
+      {|
+      (fun (n : %{c_nat_ty}) ->
+        fun X :: * . fun (s : X -> X) ->
+          fun (z : X) -> s (n [X] s z))
+      |}]
+  in
+  let c_plus =
+    [%string
+      {|
+      (fun (m : %{c_nat_ty}) ->
+        fun (n : %{c_nat_ty}) ->
+          fun X :: * . fun (s : X -> X) ->
+            fun (z : X) ->
+              m [X] s (n [X] s z))
+      |}]
+  in
+  repl c_zero;
+  repl [%string "(%{c_succ} %{c_zero})"];
+  repl [%string "((%{c_plus} (%{c_succ} %{c_zero})) (%{c_succ} %{c_zero}))"];
+  [%expect
+    {|
+    ((ty (forall A :: * . ((A -> A) -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A :: * . ((A -> A) -> (A -> A))))
+     (result (abs . (abs . (1 (((abs . (abs . 0)) 1) 0))))))
+    ((ty (forall A :: * . ((A -> A) -> (A -> A))))
+     (result
+      (abs .
+       (abs .
+        (((abs . (abs . (1 (((abs . (abs . 0)) 1) 0)))) 1)
+         (((abs . (abs . (1 (((abs . (abs . 0)) 1) 0)))) 1) 0))))))
+    |}]
+;;
+
+let%expect_test "Option type" =
+  let opt_op = "(fun T :: * . forall R :: * . (T -> R) -> R -> R)" in
+  let none = "(fun T :: * . fun R :: * . fun (s : T -> R) -> fun (n : R) -> n)" in
+  let some =
+    "(fun T :: * . fun (v : T) -> fun R :: * . fun (s : T -> R) -> fun (n : R) -> s v)"
+  in
+  let is_none =
+    [%string
+      "(fun T :: * . fun (o : (%{opt_op} T)) -> ((o [bool]) (fun (v : T) -> #f)) #t)"]
+  in
+  repl [%string "(%{none} [nat])"];
+  repl [%string "(%{some} [nat] Z)"];
+  repl [%string "(%{is_none} [nat]) (%{none} [nat])"];
+  repl [%string "(%{is_none} [nat]) (%{some} [nat] Z)"];
+  [%expect
+    {|
+    ((ty (forall A :: * . ((nat -> A) -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A :: * . ((nat -> A) -> (A -> A))))
+     (result (abs . (abs . (1 Z)))))
+    ((ty bool) (result #t))
+    ((ty bool) (result #f))
+    |}]
+;;
+
+let%expect_test "List type" =
+  let list_op = "(fun T :: * . forall R :: * . (T -> R -> R) -> R -> R)" in
+  let nil = "(fun T :: * . fun R :: * . fun (c : T -> R -> R) -> fun (n : R) -> n)" in
+  let cons =
+    [%string
+      {|
+      (fun T :: * . fun (hd : T) ->
+        fun (tl : (%{list_op} T)) ->
+          fun R :: * . fun (c : T -> R -> R) ->
+            fun (n : R) ->
+              c hd (tl [R] c n))
+      |}]
+  in
+  let length =
+    [%string
+      {|
+      (fun T :: * . fun (l : (%{list_op} T)) ->
+        ((l [nat]) (fun (x : T) -> fun (acc : nat) -> S acc)) Z)
+      |}]
+  in
+  repl
+    [%string
+      {|
+      let nilNat = %{nil} [nat] in
+      let consNat = %{cons} [nat] in
+      let lenNat = %{length} [nat] in
+      lenNat (consNat (S Z) (consNat Z nilNat))
+      |}];
+  [%expect "((ty nat) (result (S (S Z))))"]
+;;
