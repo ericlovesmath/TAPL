@@ -1,23 +1,20 @@
 open Core
 open Types
 
-let find (ctx : string list) (v : string) : int Or_error.t =
-  let rec find' acc = function
-    | [] -> error_s [%message "failed to find variable" v (ctx : string list)]
-    | h :: _ when String.equal h v -> Ok acc
-    | _ :: t -> find' (acc + 1) t
-  in
-  find' 0 ctx
-;;
-
-let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
+let rec remove_names (ctx : (string * kind) list) (ty : ty) : ty_nameless Or_error.t =
   let open Or_error.Let_syntax in
   match ty with
   | TyUnit -> Ok UTyUnit
   | TyBool -> Ok UTyBool
   | TyNat -> Ok UTyNat
   | TyVar v ->
-    let%map v = find ctx v in
+    let rec find' acc = function
+      | [] ->
+        error_s [%message "failed to find type variable" v (ctx : (string * kind) list)]
+      | (h, _) :: _ when String.equal h v -> Ok acc
+      | _ :: t -> find' (acc + 1) t
+    in
+    let%map v = find' 0 ctx in
     UTyVar v
   | TyTuple ts ->
     let%map ts = Or_error.all (List.map ~f:(remove_names ctx) ts) in
@@ -35,12 +32,19 @@ let rec remove_names (ctx : string list) (ty : ty) : ty_nameless Or_error.t =
   | TyRef ty ->
     let%map ty = remove_names ctx ty in
     UTyRef ty
-  | TyForall (v, ty) ->
-    let%map ty = remove_names (v :: ctx) ty in
-    UTyForall ty
-  | TyExists (v, ty) ->
-    let%map ty = remove_names (v :: ctx) ty in
-    UTyExists ty
+  | TyForall (v, k, ty) ->
+    let%map ty = remove_names ((v, k) :: ctx) ty in
+    UTyForall (k, ty)
+  | TyExists (v, k, ty) ->
+    let%map ty = remove_names ((v, k) :: ctx) ty in
+    UTyExists (k, ty)
+  | TyAbs (v, k, ty) ->
+    let%map ty = remove_names ((v, k) :: ctx) ty in
+    UTyAbs (k, ty)
+  | TyApp (t1, t2) ->
+    let%bind t1 = remove_names ctx t1 in
+    let%bind t2 = remove_names ctx t2 in
+    return (UTyApp (t1, t2))
 ;;
 
 let shift (d : int) (ty : ty_nameless) =
@@ -53,8 +57,10 @@ let shift (d : int) (ty : ty_nameless) =
     | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
     | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall ty -> UTyForall (walk (c + 1) ty)
-    | UTyExists ty -> UTyExists (walk (c + 1) ty)
+    | UTyForall (k, ty) -> UTyForall (k, walk (c + 1) ty)
+    | UTyExists (k, ty) -> UTyExists (k, walk (c + 1) ty)
+    | UTyAbs (k, ty) -> UTyAbs (k, walk (c + 1) ty)
+    | UTyApp (t1, t2) -> UTyApp (walk c t1, walk c t2)
   in
   walk 0 ty
 ;;
@@ -69,8 +75,10 @@ let subst (j : int) (s : ty_nameless) (ty : ty_nameless) =
     | UTyRecord r -> UTyRecord (List.map ~f:(Tuple2.map_snd ~f:(walk c)) r)
     | UTyArrow (l, r) -> UTyArrow (walk c l, walk c r)
     | UTyRef ty -> UTyRef (walk c ty)
-    | UTyForall ty -> UTyForall (walk (c + 1) ty)
-    | UTyExists ty -> UTyExists (walk (c + 1) ty)
+    | UTyForall (k, ty) -> UTyForall (k, walk (c + 1) ty)
+    | UTyExists (k, ty) -> UTyExists (k, walk (c + 1) ty)
+    | UTyAbs (k, ty) -> UTyAbs (k, walk (c + 1) ty)
+    | UTyApp (t1, t2) -> UTyApp (walk c t1, walk c t2)
   in
   walk 0 ty
 ;;
@@ -85,9 +93,119 @@ let is_free (ty : ty_nameless) : bool =
     | UTyRecord r -> List.exists r ~f:(fun (_, t) -> aux depth t)
     | UTyArrow (l, r) -> aux depth l || aux depth r
     | UTyRef t -> aux depth t
-    | UTyForall t | UTyExists t -> aux (depth + 1) t
+    | UTyForall (_, t) | UTyExists (_, t) | UTyAbs (_, t) -> aux (depth + 1) t
+    | UTyApp (t1, t2) -> aux depth t1 || aux depth t2
   in
   aux 0 ty
+;;
+
+let rec kind_of (ctx : kind list) (ty : ty_nameless) : kind Or_error.t =
+  let open Or_error.Let_syntax in
+  match ty with
+  | UTyUnit | UTyBool | UTyNat -> Ok KiStar
+  | UTyVar i ->
+    (match List.nth ctx i with
+     | Some k -> Ok k
+     | None ->
+       error_s
+         [%message
+           "failed to find type variable in kind context" (i : int) (ctx : kind list)])
+  | UTyTuple ts ->
+    let%bind () =
+      Or_error.all_unit
+        (List.map ts ~f:(fun t ->
+           let%bind k = kind_of ctx t in
+           if equal_kind k KiStar
+           then Ok ()
+           else
+             error_s
+               [%message "tuple element must have kind *" (t : ty_nameless) (k : kind)]))
+    in
+    Ok KiStar
+  | UTyRecord r ->
+    let%bind () =
+      Or_error.all_unit
+        (List.map r ~f:(fun (_, t) ->
+           let%bind k = kind_of ctx t in
+           if equal_kind k KiStar
+           then Ok ()
+           else
+             error_s
+               [%message "record field must have kind *" (t : ty_nameless) (k : kind)]))
+    in
+    Ok KiStar
+  | UTyArrow (l, r) ->
+    let%bind kl = kind_of ctx l in
+    let%bind kr = kind_of ctx r in
+    if equal_kind kl KiStar && equal_kind kr KiStar
+    then Ok KiStar
+    else
+      error_s
+        [%message
+          "arrow types must connect types of kind *"
+            (l : ty_nameless)
+            (kl : kind)
+            (r : ty_nameless)
+            (kr : kind)]
+  | UTyRef t ->
+    let%bind k = kind_of ctx t in
+    if equal_kind k KiStar
+    then Ok KiStar
+    else error_s [%message "ref must contain type of kind *" (t : ty_nameless) (k : kind)]
+  | UTyForall (k, t) ->
+    let%bind kt = kind_of (k :: ctx) t in
+    if equal_kind kt KiStar
+    then Ok KiStar
+    else error_s [%message "forall body must have kind *" (t : ty_nameless) (kt : kind)]
+  | UTyExists (k, t) ->
+    let%bind kt = kind_of (k :: ctx) t in
+    if equal_kind kt KiStar
+    then Ok KiStar
+    else error_s [%message "exists body must have kind *" (t : ty_nameless) (kt : kind)]
+  | UTyAbs (k, t) ->
+    let%map kt = kind_of (k :: ctx) t in
+    KiArrow (k, kt)
+  | UTyApp (t1, t2) ->
+    let%bind k1 = kind_of ctx t1 in
+    let%bind k2 = kind_of ctx t2 in
+    (match k1 with
+     | KiArrow (k11, k12) ->
+       if equal_kind k11 k2
+       then Ok k12
+       else
+         error_s
+           [%message
+             "kind mismatch in type application"
+               (t1 : ty_nameless)
+               (k1 : kind)
+               (t2 : ty_nameless)
+               (k2 : kind)]
+     | KiStar ->
+       error_s
+         [%message
+           "attempting to apply a type of kind * as a type operator" (t1 : ty_nameless)])
+;;
+
+let rec simplify (ty : ty_nameless) : ty_nameless =
+  match ty with
+  | UTyApp (t1, t2) ->
+    let t1 = simplify t1 in
+    let t2 = simplify t2 in
+    (match t1 with
+     | UTyAbs (_, t12) -> simplify (subst_top t2 t12)
+     | _ -> UTyApp (t1, t2))
+  | UTyTuple ts -> UTyTuple (List.map ts ~f:simplify)
+  | UTyRecord r -> UTyRecord (List.map r ~f:(fun (l, t) -> l, simplify t))
+  | UTyArrow (l, r) -> UTyArrow (simplify l, simplify r)
+  | UTyRef t -> UTyRef (simplify t)
+  | UTyForall (k, t) -> UTyForall (k, simplify t)
+  | UTyExists (k, t) -> UTyExists (k, simplify t)
+  | UTyAbs (k, t) -> UTyAbs (k, simplify t)
+  | _ -> ty
+;;
+
+let equivalent (ty1 : ty_nameless) (ty2 : ty_nameless) : bool =
+  equal_ty_nameless (simplify ty1) (simplify ty2)
 ;;
 
 let assert_unique_fields fields =
@@ -96,10 +214,11 @@ let assert_unique_fields fields =
   else error_s [%message "duplicated labels in fields" (fields : string list)]
 ;;
 
-let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
+let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : (string * kind) list) (t : t)
   : ty_nameless Or_error.t
   =
   let open Or_error.Let_syntax in
+  let kinds = List.map ty_ctx ~f:snd in
   match t with
   | EUnit -> Ok UTyUnit
   | ETrue | EFalse -> Ok UTyBool
@@ -115,7 +234,7 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
     let%bind () = assert_unique_fields (List.map ~f:fst fields) in
     Ok (UTyRecord fields)
   | EProjTuple (t, i) ->
-    (match%bind type_of ctx ty_ctx t with
+    (match%bind type_of ctx ty_ctx t |> Or_error.map ~f:simplify with
      | UTyTuple tys ->
        (match List.nth tys i with
         | Some ty -> Ok ty
@@ -125,7 +244,7 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
               "tuple projection on invalid index" (tys : ty_nameless list) (i : int)])
      | _ -> error_s [%message "expected tuple to project from" (t : t)])
   | EProjRecord (t, l) ->
-    (match%bind type_of ctx ty_ctx t with
+    (match%bind type_of ctx ty_ctx t |> Or_error.map ~f:simplify with
      | UTyRecord tys ->
        let%bind () = assert_unique_fields (List.map ~f:fst tys) in
        (match List.Assoc.find tys l ~equal:String.equal with
@@ -137,17 +256,17 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | _ -> error_s [%message "expected record to project from" (t : t)])
   | ESeq (t, t') ->
     let%bind ty_t = type_of ctx ty_ctx t in
-    if equal_ty_nameless ty_t UTyUnit
+    if equivalent ty_t UTyUnit
     then type_of ctx ty_ctx t'
     else error_s [%message "[ESeq (t, t')] expected t to be unit" (ty_t : ty_nameless)]
   | EIf (c, t, f) ->
     let%bind ty_c = type_of ctx ty_ctx c in
-    if not (equal_ty_nameless ty_c UTyBool)
+    if not (equivalent ty_c UTyBool)
     then error_s [%message "[if] condition is not TyBool" (ty_c : ty_nameless)]
     else (
       let%bind ty_t = type_of ctx ty_ctx t in
       let%bind ty_f = type_of ctx ty_ctx f in
-      if not (equal_ty_nameless ty_t ty_f)
+      if not (equivalent ty_t ty_f)
       then
         error_s
           [%message
@@ -163,15 +282,22 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
      | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
   | EAbs (v, ty_v, t) ->
     let%bind ty_v = remove_names ty_ctx ty_v in
-    let ctx = Map.set ctx ~key:v ~data:ty_v in
-    let%bind ty_t = type_of ctx ty_ctx t in
-    return (UTyArrow (ty_v, ty_t))
+    let%bind k = kind_of kinds ty_v in
+    if not (equal_kind k KiStar)
+    then
+      error_s
+        [%message
+          "abstraction parameter must have kind *" (ty_v : ty_nameless) (k : kind)]
+    else (
+      let ctx = Map.set ctx ~key:v ~data:ty_v in
+      let%bind ty_t = type_of ctx ty_ctx t in
+      return (UTyArrow (ty_v, ty_t)))
   | EApp (f, x) ->
-    let%bind ty_f = type_of ctx ty_ctx f in
+    let%bind ty_f = type_of ctx ty_ctx f |> Or_error.map ~f:simplify in
     (match ty_f with
      | UTyArrow (ty_arg, ty_body) ->
        let%bind ty_x = type_of ctx ty_ctx x in
-       if equal_ty_nameless ty_arg ty_x
+       if equivalent ty_arg ty_x
        then Ok ty_body
        else
          error_s
@@ -182,78 +308,97 @@ let rec type_of (ctx : ty_nameless String.Map.t) (ty_ctx : string list) (t : t)
   | EZero -> Ok UTyNat
   | ESucc t ->
     (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyNat
+     | ty_t when equivalent ty_t UTyNat -> Ok UTyNat
      | ty_t -> error_s [%message "expected succ to take nat" (ty_t : ty_nameless)])
   | EPred t ->
     (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyNat
+     | ty_t when equivalent ty_t UTyNat -> Ok UTyNat
      | ty_t -> error_s [%message "expected pred to take nat" (ty_t : ty_nameless)])
   | EIsZero t ->
     (match%bind type_of ctx ty_ctx t with
-     | UTyNat -> Ok UTyBool
+     | ty_t when equivalent ty_t UTyNat -> Ok UTyBool
      | ty_t -> error_s [%message "expected iszero to take nat" (ty_t : ty_nameless)])
   | ERef t ->
     let%map ty = type_of ctx ty_ctx t in
     UTyRef ty
   | EDeref t ->
-    (match%bind type_of ctx ty_ctx t with
+    (match%bind type_of ctx ty_ctx t |> Or_error.map ~f:simplify with
      | UTyRef ty -> Ok ty
      | ty -> error_s [%message "deref expects ref" (ty : ty_nameless)])
   | EAssign (v, t) ->
     (match Map.find ctx v with
-     | Some (UTyRef ty_v) ->
-       let%bind ty_t = type_of ctx ty_ctx t in
-       if equal_ty_nameless ty_v ty_t
-       then Ok UTyUnit
+     | Some ty ->
+       (match simplify ty with
+        | UTyRef ty_v ->
+          let%bind ty_t = type_of ctx ty_ctx t in
+          if equivalent ty_v ty_t
+          then Ok UTyUnit
+          else
+            error_s
+              [%message
+                "assigning to ref of wrong type" (ty_v : ty_nameless) (ty_t : ty_nameless)]
+        | _ -> error_s [%message "cannot assign to non-ref" (ty : ty_nameless)])
+     | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
+  | ETyAbs (ty_var, k, t) ->
+    let ctx' = Map.map ctx ~f:(shift 1) in
+    let ty_ctx' = (ty_var, k) :: ty_ctx in
+    let%map ty_t = type_of ctx' ty_ctx' t in
+    UTyForall (k, ty_t)
+  | ETyApp (t, ty_arg) ->
+    let%bind ty_t = type_of ctx ty_ctx t |> Or_error.map ~f:simplify in
+    let%bind ty_arg = remove_names ty_ctx ty_arg in
+    let%bind k_arg = kind_of kinds ty_arg in
+    (match ty_t with
+     | UTyForall (k_bound, ty_body) ->
+       if equal_kind k_bound k_arg
+       then Ok (subst_top ty_arg ty_body)
        else
          error_s
-           [%message
-             "assigning to ref of wrong type" (ty_v : ty_nameless) (ty_t : ty_nameless)]
-     | Some ty -> error_s [%message "cannot assign to non-ref" (ty : ty_nameless)]
-     | None -> error_s [%message "var not in context" v (ctx : ty_nameless String.Map.t)])
-  | ETyAbs (ty_var, t) ->
-    let ctx' = Map.map ctx ~f:(shift 1) in
-    let ty_ctx' = ty_var :: ty_ctx in
-    let%map ty_t = type_of ctx' ty_ctx' t in
-    UTyForall ty_t
-  | ETyApp (t, ty_arg) ->
-    let%bind ty_t = type_of ctx ty_ctx t in
-    let%bind ty_arg = remove_names ty_ctx ty_arg in
-    (match ty_t with
-     | UTyForall ty_body -> Ok (subst_top ty_arg ty_body)
+           [%message "kind mismatch in type application" (k_bound : kind) (k_arg : kind)]
      | _ -> error_s [%message "expected universal type" (ty_t : ty_nameless)])
   | EPack (ty_real, t, ty_package) ->
     let%bind ty_real = remove_names ty_ctx ty_real in
+    let%bind k_real = kind_of kinds ty_real in
     let%bind ty_package = remove_names ty_ctx ty_package in
-    (match ty_package with
-     | UTyExists ty_body ->
-       let%bind ty_t = type_of ctx ty_ctx t in
-       let expected_ty = subst_top ty_real ty_body in
-       if equal_ty_nameless ty_t expected_ty
-       then Ok ty_package
-       else
-         error_s
-           [%message
-             "pack term does not match declared existential type"
-               (ty_t : ty_nameless)
-               (expected_ty : ty_nameless)]
-     | _ ->
-       error_s
-         [%message
-           "pack annotation must be an existential type" (ty_package : ty_nameless)])
+    let%bind k_pkg = kind_of kinds ty_package in
+    if not (equal_kind k_pkg KiStar)
+    then
+      error_s
+        [%message
+          "pack annotation must have kind *" (ty_package : ty_nameless) (k_pkg : kind)]
+    else (
+      match simplify ty_package with
+      | UTyExists (k_bound, ty_body) ->
+        if not (equal_kind k_bound k_real)
+        then error_s [%message "kind mismatch in pack" (k_bound : kind) (k_real : kind)]
+        else (
+          let%bind ty_t = type_of ctx ty_ctx t in
+          let expected_ty = subst_top ty_real ty_body in
+          if equivalent ty_t expected_ty
+          then Ok ty_package
+          else
+            error_s
+              [%message
+                "pack term does not match declared existential type"
+                  (ty_t : ty_nameless)
+                  (expected_ty : ty_nameless)])
+      | _ ->
+        error_s
+          [%message
+            "pack annotation must be an existential type" (ty_package : ty_nameless)])
   | EUnpack (ty_v, t_v, t_package, t_body) ->
-    let%bind ty_pkg = type_of ctx ty_ctx t_package in
+    let%bind ty_pkg = type_of ctx ty_ctx t_package |> Or_error.map ~f:simplify in
     (match ty_pkg with
-     | UTyExists ex_body ->
+     | UTyExists (k_bound, ex_body) ->
        let ctx_shifted = Map.map ctx ~f:(shift 1) in
        let ctx' = Map.set ctx_shifted ~key:t_v ~data:ex_body in
-       let ty_ctx' = ty_v :: ty_ctx in
+       let ty_ctx' = (ty_v, k_bound) :: ty_ctx in
        let%bind result_ty = type_of ctx' ty_ctx' t_body in
        if is_free result_ty
        then
          error_s
            [%message "existential type variable escapes scope" (result_ty : ty_nameless)]
-       else Ok result_ty
+       else Ok (shift (-1) result_ty)
      | _ -> error_s [%message "unpack expects existential type" (ty_pkg : ty_nameless)])
 ;;
 
@@ -277,14 +422,23 @@ let rename_tyvars (ty : ty_nameless) : ty =
     | UTyRecord fs -> TyRecord (List.map fs ~f:(fun (l, ty) -> l, aux env ty))
     | UTyArrow (l, r) -> TyArrow (aux env l, aux env r)
     | UTyRef ty -> TyRef (aux env ty)
-    | UTyForall body ->
+    | UTyForall (k, body) ->
       let v = gensym () in
-      TyForall (v, aux (v :: env) body)
-    | UTyExists body ->
+      TyForall (v, k, aux (v :: env) body)
+    | UTyExists (k, body) ->
       let v = gensym () in
-      TyExists (v, aux (v :: env) body)
+      TyExists (v, k, aux (v :: env) body)
+    | UTyAbs (k, body) ->
+      let v = gensym () in
+      TyAbs (v, k, aux (v :: env) body)
+    | UTyApp (t, t') -> TyApp (aux env t, aux env t')
   in
   aux [] ty
 ;;
 
-let typecheck t = Or_error.map ~f:rename_tyvars (type_of String.Map.empty [] t)
+let typecheck t =
+  t
+  |> type_of String.Map.empty []
+  |> Or_error.map ~f:simplify
+  |> Or_error.map ~f:rename_tyvars
+;;

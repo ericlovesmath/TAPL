@@ -107,7 +107,7 @@ let%expect_test "universal types typechecking" =
   repl "let id = fun X . fun (x : X) -> x in id [nat]";
   [%expect
     {|
-    ((ty (forall A . (A -> A))) (result (abs . 0)))
+    ((ty (forall A :: * . (A -> A))) (result (abs . 0)))
     ((ty (nat -> nat)) (result (abs . 0)))
     |}];
   let nil = "fun X . (fun R . fun (c : X -> R -> R) -> fun (n : R) -> n)" in
@@ -123,13 +123,13 @@ let%expect_test "universal types typechecking" =
   repl cons;
   [%expect
     {|
-    ((ty (forall A . (forall B . ((A -> (B -> B)) -> (B -> B)))))
+    ((ty (forall A :: * . (forall B :: * . ((A -> (B -> B)) -> (B -> B)))))
      (result (abs . (abs . 0))))
     ((ty
-      (forall A .
+      (forall A :: * .
        (A ->
-        ((forall C . ((A -> (C -> C)) -> (C -> C))) ->
-         (forall B . ((A -> (B -> B)) -> (B -> B)))))))
+        ((forall C :: * . ((A -> (C -> C)) -> (C -> C))) ->
+         (forall B :: * . ((A -> (B -> B)) -> (B -> B)))))))
      (result (abs . (abs . (abs . (abs . ((1 3) ((2 1) 0))))))))
     |}]
 ;;
@@ -140,8 +140,9 @@ let%expect_test "existential types typechecking" =
     {*nat, { a = Z, f = fun (x : nat) -> S x }}
       as { exists X, { a : X, f: X -> X } }
     |};
-  [%expect {|
-    ((ty ({ exists A , ({ a : A , f : (A -> A) }) }))
+  [%expect
+    {|
+    ((ty ({ exists A :: * , ({ a : A , f : (A -> A) }) }))
      (result ({ a : Z , f : (abs . (S 0)) })))
     |}];
   repl "{ *nat, Z } as { exists X , X }";
@@ -154,14 +155,14 @@ let%expect_test "existential types typechecking" =
      })";
   [%expect
     {|
-    ((ty ({ exists A , A })) (result Z))
-    ((ty ({ exists A , A })) (result #t))
+    ((ty ({ exists A :: * , A })) (result Z))
+    ((ty ({ exists A :: * , A })) (result #t))
     (ty_error
      ("pack term does not match declared existential type" (ty_t nat)
       (expected_ty bool)))
-    (ty_error ("failed to find variable" Y (ctx (X))))
-    ((ty ({ exists A , bool })) (result #t))
-    ((ty ({ exists A , A })) (result Z))
+    (ty_error ("failed to find type variable" Y (ctx ((X *)))))
+    ((ty ({ exists A :: * , bool })) (result #t))
+    ((ty ({ exists A :: * , A })) (result Z))
     |}];
   let ty_counter = "{ exists C, { init : C, get : C -> nat, inc : C -> C } }" in
   let counter =
@@ -176,11 +177,59 @@ let%expect_test "existential types typechecking" =
   repl [%string "let { Counter, c } = (%{counter}) in ((c.get) ((c.inc) (c.init)))"];
   [%expect
     {|
-    ((ty ({ exists A , ({ init : A , get : (A -> nat) , inc : (A -> A) }) }))
+    ((ty
+      ({ exists A :: * , ({ init : A , get : (A -> nat) , inc : (A -> A) }) }))
      (result ({ init : Z , get : (abs . 0) , inc : (abs . (S 0)) })))
     (ty_error
      ("existential type variable escapes scope"
       (result_ty ({ init : 0 , get : (0 -> nat) , inc : (0 -> 0) }))))
     ((ty nat) (result (S Z)))
+    |}]
+;;
+
+let%expect_test "type-level computation" =
+  repl "fun (x : (fun X :: * . X) bool) -> x";
+  [%expect {| ((ty (bool -> bool)) (result (abs . 0))) |}];
+  repl "fun (x : (fun X :: * . X -> X) bool) -> x";
+  [%expect {| ((ty ((bool -> bool) -> (bool -> bool))) (result (abs . 0))) |}];
+  repl "(fun (x : (fun X :: * . X) bool) -> x) #t";
+  [%expect {| ((ty bool) (result #t)) |}];
+  repl "fun (x : (fun F :: * => * . F bool) (fun X :: * . X)) -> x";
+  [%expect {| ((ty (bool -> bool)) (result (abs . 0))) |}];
+  repl "fun (x : (fun F :: * => * . F bool) (fun X :: * . X -> X)) -> x";
+  [%expect {| ((ty ((bool -> bool) -> (bool -> bool))) (result (abs . 0))) |}]
+;;
+
+let%expect_test "higher-order polymorphism" =
+  repl "fun F :: * => * . fun (x : F bool) -> x";
+  [%expect
+    {| ((ty (forall A :: (* => *) . ((A bool) -> (A bool)))) (result (abs . 0))) |}];
+  let id_f = "(fun F :: * => * . fun (x : F bool) -> x)" in
+  repl [%string "(%{id_f} [fun X :: * . X]) #t"];
+  [%expect {| ((ty bool) (result #t)) |}];
+  repl [%string "(%{id_f} [fun X :: * . X -> X]) (fun (b : bool) -> b)"];
+  [%expect {| ((ty (bool -> bool)) (result (abs . 0))) |}]
+;;
+
+let%expect_test "kind errors" =
+  repl "fun (x : (fun X :: * . X) [bool]) -> x";
+  [%expect
+    {|
+    (parse_err
+     ((chomp_error "satisfy_fail on token LBRACKET at 1:27")
+      (contexts ("t_abs at 1:1" "t_atom at 1:1"))))
+    |}];
+  repl "fun (x : bool nat) -> x";
+  [%expect
+    {|
+    (ty_error
+     ("attempting to apply a type of kind * as a type operator" (t1 bool)))
+    |}];
+  repl "fun (x : (fun X :: * => * . X) bool) -> x";
+  [%expect
+    {|
+    (ty_error
+     ("kind mismatch in type application" (t1 (fun :: (* => *) . 0))
+      (k1 ((* => *) => (* => *))) (t2 bool) (k2 *)))
     |}]
 ;;
