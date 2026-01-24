@@ -56,6 +56,7 @@ module Recursive_types_repl = Make (Recursive_types)
 module Hindley_milner_repl = Make (Hindley_milner)
 module System_f_repl = Make (System_f)
 module F_sub_repl = Make (F_sub)
+module F_omega_repl = Make (F_omega)
 
 let command =
   Command.basic
@@ -73,6 +74,7 @@ let command =
        | "hm" | "let" | "letpoly" -> Hindley_milner_repl.start ()
        | "f" | "systemf" | "sf" -> System_f_repl.start ()
        | "fsub" | "systemfsub" -> F_sub_repl.start ()
+       | "fomega" | "systemfomega" -> F_omega_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 

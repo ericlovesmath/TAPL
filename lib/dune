@@ -11,4 +11,5 @@
    recursive_types
    hindley_milner
    system_f
-   f_sub))
+   f_sub
+   f_omega))
