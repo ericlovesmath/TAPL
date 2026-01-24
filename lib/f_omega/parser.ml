@@ -27,9 +27,27 @@ let between brace_type p =
 
 let commas p = sep_by1 (tok COMMA) p
 
+let rec kind_p =
+  fun st ->
+  let kind_p = kind_arrow_p <|> kind_atom_p in
+  (kind_p <|> between `Paren kind_p <??> "kind") st
+
+and kind_atom_p = fun st -> (tok STAR *> return KiStar <??> "kind_star") st
+
+and kind_arrow_p =
+  fun st ->
+  (let%bind l = kind_atom_p <|> between `Paren kind_p in
+   tok DARROW
+   *> commit
+        (let%bind r = kind_p in
+         return (KiArrow (l, r)))
+   <??> "kind_arrow")
+    st
+;;
+
 let rec ty_p =
   fun st ->
-  let ty_p = ty_arrow_p <|> ty_atom_p in
+  let ty_p = ty_abs_p <|> ty_arrow_p <|> ty_app_p <|> ty_atom_p in
   (ty_p <|> between `Paren ty_p <??> "ty") st
 
 and ty_atom_p =
@@ -67,9 +85,16 @@ and ty_record_p =
    return (TyRecord fields) <??> "ty_record")
     st
 
+and ty_app_p =
+  fun st ->
+  (let%bind t = ty_atom_p <|> between `Paren ty_p in
+   let%bind ts = many (ty_atom_p <|> between `Paren ty_p) in
+   return (List.fold_left ts ~init:t ~f:(fun f x -> TyApp (f, x))) <??> "ty_app")
+    st
+
 and ty_arrow_p =
   fun st ->
-  (let%bind l = ty_atom_p <|> between `Paren ty_p in
+  (let%bind l = ty_app_p <|> ty_atom_p <|> between `Paren ty_p in
    tok ARROW
    *> commit
         (let%bind r = ty_p in
@@ -84,8 +109,9 @@ and ty_forall =
   (tok FORALL
    *> commit
         (let%bind v = ident_p in
+         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
          let%bind ty = tok DOT *> ty_p in
-         return (TyForall (v, ty)))
+         return (TyForall (v, k, ty)))
    <??> "ty_forall")
     st
 
@@ -95,9 +121,21 @@ and ty_exists =
    *> tok EXISTS
    *> commit
         (let%bind v = ident_p in
+         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
          let%bind ty = tok COMMA *> ty_p <* tok RCURLY in
-         return (TyExists (v, ty)))
+         return (TyExists (v, k, ty)))
    <??> "ty_exists")
+    st
+
+and ty_abs_p =
+  fun st ->
+  (tok FUN
+   *> commit
+        (let%bind v = ident_p in
+         let%bind k = tok DCOLON *> kind_p in
+         let%bind ty = tok DOT *> ty_p in
+         return (TyAbs (v, k, ty)))
+   <??> "ty_abs")
     st
 ;;
 
@@ -118,7 +156,13 @@ let%expect_test "ty parse tests" =
   test "A -> (X -> nat) -> bool";
   test "(A -> X) -> (nat -> bool)";
   test "forall X . X";
+  test "forall X :: * . X";
+  test "forall X :: * => * . X";
+  test "fun X :: * . X";
+  test "fun X :: * => * . X";
+  test "A B C";
   test "{exists X, X -> bool}";
+  test "{exists X :: *, X -> bool}";
   [%expect
     {|
     (Ok A)
@@ -128,8 +172,14 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok (A -> ((X -> nat) -> bool)))
     (Ok ((A -> X) -> (nat -> bool)))
-    (Ok (forall X . X))
-    (Ok ({ exists X , (X -> bool) }))
+    (Ok (forall X :: * . X))
+    (Ok (forall X :: * . X))
+    (Ok (forall X :: (* => *) . X))
+    (Ok (fun X :: * . X))
+    (Ok (fun X :: (* => *) . X))
+    (Ok ((A B) C))
+    (Ok ({ exists X :: * , (X -> bool) }))
+    (Ok ({ exists X :: * , (X -> bool) }))
     |}];
   test "forall X nat";
   test "(X -> forall X -> X)";
@@ -159,7 +209,11 @@ let%expect_test "ty parse tests" =
 let rec t_p =
   fun st ->
   (let%bind t = t_atom_p <|> between `Paren t_p in
-   t_proj_p t <|> t_seq_p t <|> t_ty_app_p t <|> t_app_p t <|> return t <??> "t")
+   let rec postfix t =
+     t_proj_p t <|> t_ty_app_p t <|> t_app_p t >>= postfix <|> return t
+   in
+   let%bind t = postfix t in
+   t_seq_p t <|> return t <??> "t")
     st
 
 and t_atom_p =
@@ -263,8 +317,8 @@ and t_if_p =
     st
 
 and t_app_p t =
-  let%bind ts = many (t_atom_p <|> between `Paren t_p) in
-  return (List.fold_left ~f:(fun f x -> EApp (f, x)) ~init:t ts) <??> "t_app"
+  let%bind x = t_atom_p <|> between `Paren t_p in
+  return (EApp (t, x)) <??> "t_app"
 
 and t_succ_p st = (tok SUCC *> commit t_p <??> "t_succ" >>| fun t -> ESucc t) st
 and t_pred_p st = (tok PRED *> commit t_p <??> "t_pred" >>| fun t -> EPred t) st
@@ -287,8 +341,9 @@ and t_ty_abs_p =
   (tok FUN
    *> commit
         (let%bind v = ident_p in
+         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
          let%bind t = tok DOT *> t_p in
-         return (ETyAbs (v, t)))
+         return (ETyAbs (v, k, t)))
    <??> "t_ty_abs")
     st
 
@@ -365,7 +420,7 @@ let%expect_test "t parse tests" =
   test "id [bool]";
   [%expect
     {|
-    (Ok (fun x . id))
+    (Ok (fun x :: * . id))
     (Ok ({* int , term } as bool))
     (Ok (let { ty , v } = Z in (S Z)))
     (Ok (id [ bool ]))
