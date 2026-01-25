@@ -1,11 +1,41 @@
-# Types and Programming Languages
+# TAPL Implementations in OCaml
 
-OCaml implementations of selected chapters in [Types and Programming Languages](https://www.cis.upenn.edu/~bcpierce/tapl/) by Benjamin C. Pierce, without direct references of the original ML implementations.
+This repository contains OCaml implementations of various type systems described in [**Types and Programming Languages (TAPL)**](https://www.cis.upenn.edu/~bcpierce/tapl/). The project avoids direct reference to the original ML implementations provided with the book.
 
-Run `dune test` to run [let_expect](https://github.com/janestreet/ppx_expect) tests, and `dune utop` to explore. `dune promote` will update tests.
+Each type system is implemented in its own directory under `lib/`. The only exceptions are the shared `lib/chomp`, a simple monadic parser combinator library, and `lib/general_interpreter`, a shared interpreter for the nameless lambda calculus.
 
-Run `dune build` and `rlwrap ./_build/default/bin/main.exe -impl <IMPL>` for a simple REPL interface
+| Implementation              | TAPL Chapters | Description                                   |
+| :-------------------------- | :------------ | :-------------------------------------------- |
+| `untyped_lambda_calculus`     | 2-5           | Untyped Lambda Calculus (Named)               |
+| `nameless_nameless`           | 6-7           | Untyped Lambda Calculus (Nameless/De Bruijn)  |
+| `simply_typed_lambda_calculus`| 8-10          | Simply Typed Lambda Calculus                  |
+| `simply_typed_extended`       | 11-14         | STLC with normalization, refs, and exceptions |
+| `subtyping`                   | 15-18         | STLC with Subtyping and row polymorphism      |
+| `featherweight_java`          | 19            | Featherweight Java                            |
+| `recursive_types`             | 20-21         | Recursive Types (Iso-recursive)               |
+| `hindley_milner`              | 22            | Hindley-Milner Type Inference                 |
+| `system_f`                    | 23-25         | System F (Polymorphic Lambda Calculus)        |
+| `f_sub`                       | 26-28         | System F-sub (Bounded Quantification)         |
+| `f_omega`                     | 29-30         | System F-omega (Higher-order Polymorphism)    |
 
-The `Makefile` provides convenient wrappers for building and running code, and the nix flake is there to install the relevant Opam packages if needed.
+## Building and Running
 
-NOTE: `web` depends on the [Bonsai](https://github.com/janestreet/bonsai) frontend library, which is only supported (as of (2025-12-10) on OCaml 5.1.1 until [Jane Street's js_of_ocaml_patches](https://github.com/janestreet/js_of_ocaml_patches/issues/1) issue is resolved. `web` will not build unless `ocaml <= 5.1.1` is used, but the rest of the library will build on later versions.
+```bash
+   # nix devshell with relevant packages
+   # If nix is not installed, the required opam packages are in TAPL.opam
+   nix develop
+   dune build
+
+   # Run REPL for fomega, see `bin/main.ml` for exhaustive list
+   make repl IMPL=fomega
+
+   # This project uses `ppx_expect` for integration testing
+   # You can see the expected output directly in the source (e.g. see lib/f_omega/f_omega.ml for f_omega tests)
+   # Run let%expect tests and update them with the new output with the following
+   dune test lib/fomega
+   dune promote
+```
+
+## Contributing
+
+This repository is primarily for personal learning. If you find bugs or want to suggest improvements to the implementations, feel free to open an issue or a pull request.
