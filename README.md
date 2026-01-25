@@ -2,7 +2,7 @@
 
 This repository contains OCaml implementations of various type systems described in [**Types and Programming Languages (TAPL)**](https://www.cis.upenn.edu/~bcpierce/tapl/). The project avoids direct reference to the original ML implementations provided with the book.
 
-Each type system is implemented in its own directory under `lib/`. The only exceptions are the shared `lib/chomp`, a simple monadic parser combinator library, and `lib/general_interpreter`, a shared interpreter for the nameless lambda calculus.
+Each type system is implemented in its own directory under `lib/`. The only exceptions are the shared `lib/chomp`, a simple monadic parser combinator library, and `lib/general_interpreter`, a shared interpreter for the nameless lambda calculus. The codebase heavily uses the [core](https://github.com/janestreet/core) standard library with their monadic `let%bind` syntax, along with Jane Street's [ppx_expect](https://github.com/janestreet/ppx_expect) testing framework.
 
 | Implementation              | TAPL Chapters | Description                                   |
 | :-------------------------- | :------------ | :-------------------------------------------- |
