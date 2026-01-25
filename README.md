@@ -21,19 +21,20 @@ Each type system is implemented in its own directory under `lib/`. The only exce
 ## Building and Running
 
 ```bash
-   # nix devshell with relevant packages
-   # If nix is not installed, the required opam packages are in TAPL.opam
-   nix develop
-   dune build
+# nix devshell with relevant packages
+# If nix is not installed, the required opam packages are in TAPL.opam
+nix develop
+dune build
 
-   # Run REPL for fomega, see `bin/main.ml` for exhaustive list
-   make repl IMPL=fomega
+# Run REPL for fomega, see `bin/main.ml` for exhaustive list
+make repl IMPL=fomega
 
-   # This project uses `ppx_expect` for integration testing
-   # You can see the expected output directly in the source (e.g. see lib/f_omega/f_omega.ml for f_omega tests)
-   # Run let%expect tests and update them with the new output with the following
-   dune test lib/fomega
-   dune promote
+# This project uses `ppx_expect` for integration testing
+# You can see the expected output directly in the source
+# (e.g. see lib/f_omega/f_omega.ml for f_omega tests)
+# Run let%expect tests and update them with the new output with the following
+dune test lib/fomega
+dune promote
 ```
 
 ## Contributing
