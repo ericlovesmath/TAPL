@@ -12,4 +12,5 @@
    hindley_milner
    system_f
    f_sub
-   f_omega))
+   f_omega
+   f_omega_sub))

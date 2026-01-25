@@ -11,3 +11,4 @@ module Hindley_milner = Hindley_milner
 module System_f = System_f
 module F_sub = F_sub
 module F_omega = F_omega
+module F_omega_sub = F_omega_sub

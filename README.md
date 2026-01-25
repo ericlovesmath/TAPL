@@ -17,6 +17,7 @@ Each type system is implemented in its own directory under `lib/`. The only exce
 | `system_f`                    | 23-25         | System F (Polymorphic Lambda Calculus)        |
 | `f_sub`                       | 26-28         | System F-sub (Bounded Quantification)         |
 | `f_omega`                     | 29-30         | System F-omega (Higher-order Polymorphism)    |
+| `f_omega_sub`                 | 31-32         | System F-omega-sub (Higher-order Subtyping)   |
 
 ## Building and Running
 

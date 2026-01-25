@@ -57,6 +57,7 @@ module Hindley_milner_repl = Make (Hindley_milner)
 module System_f_repl = Make (System_f)
 module F_sub_repl = Make (F_sub)
 module F_omega_repl = Make (F_omega)
+module F_omega_sub_repl = Make (F_omega_sub)
 
 let command =
   Command.basic
@@ -75,6 +76,7 @@ let command =
        | "f" | "systemf" | "sf" -> System_f_repl.start ()
        | "fsub" | "systemfsub" -> F_sub_repl.start ()
        | "fomega" | "systemfomega" -> F_omega_repl.start ()
+       | "fomegasub" | "systemfomegasub" -> F_omega_sub_repl.start ()
        | _ -> print_endline "unknown implementation")
 ;;
 
