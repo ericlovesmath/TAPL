@@ -52,7 +52,21 @@ let rec ty_p =
 
 and ty_atom_p =
   fun st ->
-  (ty_singles_p <|> ty_forall <|> ty_exists <|> ty_tuple_p <|> ty_record_p <|> ty_ref_p)
+  (ty_top_p
+   <|> ty_singles_p
+   <|> ty_forall
+   <|> ty_exists
+   <|> ty_tuple_p
+   <|> ty_record_p
+   <|> ty_ref_p)
+    st
+
+and ty_top_p st =
+  (tok TOP
+   *> commit
+        (let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+         return (TyTop k))
+   <??> "ty_top")
     st
 
 and ty_singles_p =
@@ -109,9 +123,20 @@ and ty_forall =
   (tok FORALL
    *> commit
         (let%bind v = ident_p in
-         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+         let%bind bound, k =
+           (tok SUBTYPE
+            *>
+            let%bind bound = ty_p in
+            let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+            return (bound, k))
+           <|> (tok DCOLON
+                *>
+                let%bind k = kind_p in
+                return (TyTop k, k))
+           <|> return (TyTop KiStar, KiStar)
+         in
          let%bind ty = tok DOT *> ty_p in
-         return (TyForall (v, k, ty)))
+         return (TyForall (v, bound, k, ty)))
    <??> "ty_forall")
     st
 
@@ -121,9 +146,20 @@ and ty_exists =
    *> tok EXISTS
    *> commit
         (let%bind v = ident_p in
-         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+         let%bind bound, k =
+           (tok SUBTYPE
+            *>
+            let%bind bound = ty_p in
+            let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+            return (bound, k))
+           <|> (tok DCOLON
+                *>
+                let%bind k = kind_p in
+                return (TyTop k, k))
+           <|> return (TyTop KiStar, KiStar)
+         in
          let%bind ty = tok COMMA *> ty_p <* tok RCURLY in
-         return (TyExists (v, k, ty)))
+         return (TyExists (v, bound, k, ty)))
    <??> "ty_exists")
     st
 
@@ -172,14 +208,14 @@ let%expect_test "ty parse tests" =
     (Ok ((A -> X) -> (nat -> bool)))
     (Ok (A -> ((X -> nat) -> bool)))
     (Ok ((A -> X) -> (nat -> bool)))
-    (Ok (forall X :: * . X))
-    (Ok (forall X :: * . X))
+    (Ok (forall X . X))
+    (Ok (forall X . X))
     (Ok (forall X :: (* => *) . X))
     (Ok (fun X :: * . X))
     (Ok (fun X :: (* => *) . X))
     (Ok ((A B) C))
-    (Ok ({ exists X :: * , (X -> bool) }))
-    (Ok ({ exists X :: * , (X -> bool) }))
+    (Ok ({ exists X , (X -> bool) }))
+    (Ok ({ exists X , (X -> bool) }))
     |}];
   test "forall X nat";
   test "(X -> forall X -> X)";
@@ -341,9 +377,20 @@ and t_ty_abs_p =
   (tok FUN
    *> commit
         (let%bind v = ident_p in
-         let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+         let%bind bound, k =
+           (tok SUBTYPE
+            *>
+            let%bind bound = ty_p in
+            let%bind k = tok DCOLON *> kind_p <|> return KiStar in
+            return (bound, k))
+           <|> (tok DCOLON
+                *>
+                let%bind k = kind_p in
+                return (TyTop k, k))
+           <|> return (TyTop KiStar, KiStar)
+         in
          let%bind t = tok DOT *> t_p in
-         return (ETyAbs (v, k, t)))
+         return (ETyAbs (v, bound, k, t)))
    <??> "t_ty_abs")
     st
 
@@ -420,7 +467,7 @@ let%expect_test "t parse tests" =
   test "id [bool]";
   [%expect
     {|
-    (Ok (fun x :: * . id))
+    (Ok (fun x . id))
     (Ok ({* int , term } as bool))
     (Ok (let { ty , v } = Z in (S Z)))
     (Ok (id [ bool ]))
@@ -443,5 +490,25 @@ let%expect_test "t parse tests" =
       (fun x : nat ->
        (fun y : nat -> (if (iszero x) then y else ((add (pred x)) (S y)))))
       in ((add (S (S Z))) (S (S Z)))))
+    |}]
+;;
+
+let%expect_test "top parsing" =
+  let test s =
+    s
+    |> Chomp.Lexer.of_string
+    |> Chomp.Lexer.lex
+    |> run ty_p
+    |> Or_error.sexp_of_t sexp_of_ty
+    |> print_s
+  in
+  test "top";
+  test "top :: *";
+  test "top :: * => *";
+  [%expect
+    {|
+    (Ok top)
+    (Ok top)
+    (Ok (top :: (* => *)))
     |}]
 ;;
