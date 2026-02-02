@@ -25,13 +25,9 @@ let%expect_test "typechecker tests prior to extending" =
   repl "if #t then #f else #f";
   [%expect {| ((ty bool) (result #f)) |}];
   repl "if (fun (x : bool) -> x) then #t else #f";
-  [%expect {| (ty_error ("[if] condition is not TyBool" (ty_c (bool -> bool)))) |}];
+  [%expect {| (ty_error ("[if] cond doesn't subsume to TyBool" (ty_c (bool -> bool)))) |}];
   repl "if #t then #t else (fun (x : bool) -> x)";
-  [%expect
-    {|
-    (ty_error
-     ("[if] branches have unequal types" (ty_t bool) (ty_f (bool -> bool))))
-    |}];
+  [%expect {| ((ty top) (result #t)) |}];
   repl "y";
   [%expect {| (ty_error ("var not in context" y (ctx ()))) |}];
   let id = "(fun (x : bool) -> x)" in
@@ -46,7 +42,7 @@ let%expect_test "typechecker tests prior to extending" =
      ("arg can't be applied to func" (ty_f (bool -> bool)) (ty_x (bool -> bool))))
     |}];
   repl "(#t #f)";
-  [%expect {| (ty_error ("attempting to apply to non-arrow type" (ty_f bool))) |}];
+  [%expect {| (ty_error ("can't apply to non-arrow type" (ty_f bool))) |}];
   repl "(fun (x : bool -> bool) -> x)";
   [%expect {| ((ty ((bool -> bool) -> (bool -> bool))) (result (abs . 0))) |}]
 ;;
@@ -107,7 +103,7 @@ let%expect_test "universal types typechecking" =
   repl "let id = fun X . fun (x : X) -> x in id [nat]";
   [%expect
     {|
-    ((ty (forall A :: * . (A -> A))) (result (abs . 0)))
+    ((ty (forall A . (A -> A))) (result (abs . 0)))
     ((ty (nat -> nat)) (result (abs . 0)))
     |}];
   let nil = "fun X . (fun R . fun (c : X -> R -> R) -> fun (n : R) -> n)" in
@@ -123,13 +119,13 @@ let%expect_test "universal types typechecking" =
   repl cons;
   [%expect
     {|
-    ((ty (forall A :: * . (forall B :: * . ((A -> (B -> B)) -> (B -> B)))))
+    ((ty (forall A . (forall B . ((A -> (B -> B)) -> (B -> B)))))
      (result (abs . (abs . 0))))
     ((ty
-      (forall A :: * .
+      (forall A .
        (A ->
-        ((forall C :: * . ((A -> (C -> C)) -> (C -> C))) ->
-         (forall B :: * . ((A -> (B -> B)) -> (B -> B)))))))
+        ((forall C . ((A -> (C -> C)) -> (C -> C))) ->
+         (forall B . ((A -> (B -> B)) -> (B -> B)))))))
      (result (abs . (abs . (abs . (abs . ((1 3) ((2 1) 0))))))))
     |}]
 ;;
@@ -142,7 +138,7 @@ let%expect_test "existential types typechecking" =
     |};
   [%expect
     {|
-    ((ty ({ exists A :: * , ({ a : A , f : (A -> A) }) }))
+    ((ty ({ exists A , ({ a : A , f : (A -> A) }) }))
      (result ({ a : Z , f : (abs . (S 0)) })))
     |}];
   repl "{ *nat, Z } as { exists X , X }";
@@ -155,14 +151,14 @@ let%expect_test "existential types typechecking" =
      })";
   [%expect
     {|
-    ((ty ({ exists A :: * , A })) (result Z))
-    ((ty ({ exists A :: * , A })) (result #t))
+    ((ty ({ exists A , A })) (result Z))
+    ((ty ({ exists A , A })) (result #t))
     (ty_error
      ("pack term does not match declared existential type" (ty_t nat)
       (expected_ty bool)))
-    (ty_error ("failed to find type variable" Y (ctx ((X *)))))
-    ((ty ({ exists A :: * , bool })) (result #t))
-    ((ty ({ exists A :: * , A })) (result Z))
+    (ty_error ("failed to find type variable" Y (ctx ((X top *)))))
+    ((ty ({ exists A , bool })) (result #t))
+    ((ty ({ exists A , A })) (result Z))
     |}];
   let ty_counter = "{ exists C, { init : C, get : C -> nat, inc : C -> C } }" in
   let counter =
@@ -177,12 +173,11 @@ let%expect_test "existential types typechecking" =
   repl [%string "let { Counter, c } = (%{counter}) in ((c.get) ((c.inc) (c.init)))"];
   [%expect
     {|
-    ((ty
-      ({ exists A :: * , ({ init : A , get : (A -> nat) , inc : (A -> A) }) }))
+    ((ty ({ exists A , ({ init : A , get : (A -> nat) , inc : (A -> A) }) }))
      (result ({ init : Z , get : (abs . 0) , inc : (abs . (S 0)) })))
     (ty_error
      ("existential type variable escapes scope"
-      (result_ty ({ init : 0 , get : (0 -> nat) , inc : (0 -> 0) }))))
+      (ty_res ({ init : 0 , get : (0 -> nat) , inc : (0 -> 0) }))))
     ((ty nat) (result (S Z)))
     |}]
 ;;
@@ -247,10 +242,10 @@ let%expect_test "Church Encodings" =
   repl [%string "(%{c_and} %{c_true} %{c_false})"];
   [%expect
     {|
-    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 1))))
-    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 0))))
-    ((ty (forall A :: * . (A -> (A -> A)))) (result (abs . (abs . 0))))
-  |}];
+    ((ty (forall A . (A -> (A -> A)))) (result (abs . (abs . 1))))
+    ((ty (forall A . (A -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A . (A -> (A -> A)))) (result (abs . (abs . 0))))
+    |}];
   let c_nat_ty = "(forall X :: * . (X -> X) -> X -> X)" in
   let c_zero = "(fun X :: * . fun (s : X -> X) -> fun (z : X) -> z)" in
   let c_succ =
@@ -276,10 +271,10 @@ let%expect_test "Church Encodings" =
   repl [%string "((%{c_plus} (%{c_succ} %{c_zero})) (%{c_succ} %{c_zero}))"];
   [%expect
     {|
-    ((ty (forall A :: * . ((A -> A) -> (A -> A)))) (result (abs . (abs . 0))))
-    ((ty (forall A :: * . ((A -> A) -> (A -> A))))
+    ((ty (forall A . ((A -> A) -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A . ((A -> A) -> (A -> A))))
      (result (abs . (abs . (1 (((abs . (abs . 0)) 1) 0))))))
-    ((ty (forall A :: * . ((A -> A) -> (A -> A))))
+    ((ty (forall A . ((A -> A) -> (A -> A))))
      (result
       (abs .
        (abs .
@@ -304,9 +299,8 @@ let%expect_test "Option type" =
   repl [%string "(%{is_none} [nat]) (%{some} [nat] Z)"];
   [%expect
     {|
-    ((ty (forall A :: * . ((nat -> A) -> (A -> A)))) (result (abs . (abs . 0))))
-    ((ty (forall A :: * . ((nat -> A) -> (A -> A))))
-     (result (abs . (abs . (1 Z)))))
+    ((ty (forall A . ((nat -> A) -> (A -> A)))) (result (abs . (abs . 0))))
+    ((ty (forall A . ((nat -> A) -> (A -> A)))) (result (abs . (abs . (1 Z)))))
     ((ty bool) (result #t))
     ((ty bool) (result #f))
     |}]
@@ -341,4 +335,64 @@ let%expect_test "List type" =
       lenNat (consNat (S Z) (consNat Z nilNat))
       |}];
   [%expect "((ty nat) (result (S (S Z))))"]
+;;
+
+let%expect_test "f sub tests" =
+  repl "fun X <: nat . fun (x : X) -> x";
+  [%expect {| ((ty (forall A <: nat . (A -> A))) (result (abs . 0))) |}];
+  repl
+    {|
+    let f = fun X <: nat . fun (x : X) -> x in
+    f [nat] (S Z)
+    |};
+  [%expect {| ((ty nat) (result (S Z))) |}];
+  repl "let f = fun X <: nat . fun (x : X) -> x in f [bool] #t";
+  [%expect
+    {|
+    (ty_error
+     ("type argument does not satisfy bound" (ty_arg bool) (ty_sub nat)))
+    |}];
+  repl
+    {|
+    let f = fun F <: (fun X :: * . top) :: (* => *) . fun (x : nat) -> x in
+    f [fun Y :: * . nat]
+    |};
+  [%expect {| ((ty (nat -> nat)) (result (abs . 0))) |}];
+  repl
+    {|
+    let p = {*nat, S Z} as {exists X <: nat, X} in
+    let {X, x} = p in
+    S x
+    |};
+  [%expect {| ((ty nat) (result (S (S Z)))) |}];
+  repl "let p = {*bool, #t} as {exists X <: nat, X} in p";
+  [%expect
+    {|
+    (ty_error
+     ("witness type does not satisfy bound" (ty_real bool) (ty_bound nat)))
+    |}]
+;;
+
+let%expect_test "higher-kinded top" =
+  repl "fun (x : top :: * => *) -> x";
+  [%expect
+    {|
+    (ty_error
+     ("abstraction parameter must have kind *" (ty_v (top :: (* => *)))
+      (k (* => *))))
+    |}]
+;;
+
+let%expect_test "Operator Subtyping" =
+  let op = "fun X :: * . { x : X }" in
+  repl
+    [%string
+      {|
+      let f = fun (r : (%{op}) nat) -> r.x in
+      let record = { x = Z, y = S Z } in
+      f record
+      |}];
+  [%expect {| ((ty nat) (result Z)) |}];
+  repl [%string "(fun (f : (fun F :: * => * . F nat) (%{op})) -> f.x) { x = Z, y = #t }"];
+  [%expect {| ((ty nat) (result Z)) |}]
 ;;
