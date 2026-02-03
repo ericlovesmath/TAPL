@@ -144,10 +144,23 @@
     - Typechecking for universal and existential types
     - Tests for universal types
 
-- TODO: Ascription to act as type alias, as its really hard to read some types
-- TODO: Add global eval function
-
 # Week 10
+
+- Add global eval function
+- Fix Bonsai dependency, add nix flake
+
+# Week 11
+
+- Add context stack information to chomp
+- Implement f-sub
+
+# Week 12
+
+- Implement f-omega
+
+# Week 13
+
+- Implement f-omega-sub
 
 # TODO
 
@@ -155,20 +168,18 @@
 - List / Arrays / Exceptions
 - Push Bonsai code
 - `meet` (as in `join`/`meet`)
-- Evaluator for `subtyping`, coercion semantics for runtime evaluation in `subtyping`?
-- Upload notes on TAPL to Github
+- Coercion semantics for runtime evaluation in `subtyping`?
 - Chapter 18/19 tests with objects
 - Web interface to quickly run examples
+- Mass commenting and documentation backlog
 
-- Potential TODOs:
+- FJ: Better error messages in typechecker / evaluator
+- FJ: Less tolerant parser for constructors
+- FJ: Check for dependency cycles in subtyping
+- FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
+- REC: More examples and tests
 
-    - FJ: Better error messages in typechecker / evaluator
-    - FJ: Less tolerant parser for constructors
-    - FJ: Check for dependency cycles in subtyping
-    - FJ: Extension exercises (assign field`ref`-style, `raise/try`, interfaces, `super`, primitives) 
-    - REC: More examples and tests
-
-    - GM: Add more cases in general
-    - GM: Tuples (need TupleProj type?)
-    - GM: Row Polymorphism with records
-    - GM: Better checks for free vars, aside from syntactic restriction
+- GM: Add more cases in general
+- GM: Tuples (need TupleProj type?)
+- GM: Row Polymorphism with records
+- GM: Better checks for free vars, aside from syntactic restriction
